@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Sem o OutputType, o projeto compila para .dll por padrão -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FastColoredTextBox.NET10" Version="2.16.26.9180" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="LiteTools.Interfaces">
+      <HintPath>..\..\eugenio122\LiteTools\LiteTools\bin\Debug\net10.0-windows\LiteTools.Interfaces.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>
