@@ -10,9 +10,9 @@ using LiteAutomation.Enums;
 using LiteAutomation.Interfaces;
 using LiteTools.Core.Languages;
 
-namespace LiteAutomation.Generators.CSharp
+namespace LiteAutomation.Generators.Java
 {
-    public class SeleniumBddCSharpGenerator : ICodeGenerator
+    public class SeleniumBddJavaGenerator : ICodeGenerator
     {
         private class StepInfo
         {
@@ -34,19 +34,15 @@ namespace LiteAutomation.Generators.CSharp
             var examples = new Dictionary<string, string>();
             var generatedSteps = new List<StepInfo>();
 
-            // 🚀 FIX 1: Chama o DeltaAnalyzer em tempo real para captar os seletores do Painel SDET na hora!
             var analyzer = new DeltaAnalyzer();
             var validIntents = analyzer.Analyze(workspace.RawSteps, config)
                                        .Where(i => !i.IsNewStepHeader && i.Type != IntentType.Unknown)
                                        .ToList();
 
             int lastActionIndex = validIntents.FindLastIndex(i =>
-                i.Type == IntentType.Click ||
-                i.Type == IntentType.InputText ||
-                i.Type == IntentType.KeyPress ||
-                i.Type == IntentType.Hover ||
-                i.Type == IntentType.Blur ||
-                i.Type == IntentType.ScrollTo ||
+                i.Type == IntentType.Click || i.Type == IntentType.InputText ||
+                i.Type == IntentType.KeyPress || i.Type == IntentType.Hover ||
+                i.Type == IntentType.Blur || i.Type == IntentType.ScrollTo ||
                 i.Type == IntentType.NavigateToUrl);
 
             string lastContext = "";
@@ -107,7 +103,6 @@ namespace LiteAutomation.Generators.CSharp
                     {
                         var bidi = rawMicro.CapturedData?.WebDriverBiDi?.ElementData;
                         var uia = rawMicro.CapturedData?.Uia?.ElementData;
-
                         rawText = uia?.Semantic?.AccessibleName?.Value ?? bidi?.SelectorSet?.Text?.Value ?? bidi?.SelectorSet?.AriaLabel?.Value ?? bidi?.SelectorSet?.Name?.Value ?? "";
                         role = bidi?.Semantic?.Role?.Value ?? uia?.Semantic?.Role?.Value ?? "";
                     }
@@ -115,18 +110,9 @@ namespace LiteAutomation.Generators.CSharp
                     {
                         string pTitle = rawMain.ObservedContext?.PageTitle;
                         string sName = rawMain.StepName;
-
-                        if (!string.IsNullOrWhiteSpace(pTitle))
-                        {
-                            rawText = pTitle;
-                            if (rawText.Contains("-")) rawText = rawText.Split('-')[0];
-                            if (rawText.Contains("|")) rawText = rawText.Split('|')[0];
-                        }
-                        else if (!string.IsNullOrWhiteSpace(sName) && !sName.ToLower().Contains("nova a"))
-                            rawText = sName;
-                        else
-                            rawText = "carregamento atual";
-
+                        if (!string.IsNullOrWhiteSpace(pTitle)) { rawText = pTitle; if (rawText.Contains("-")) rawText = rawText.Split('-')[0]; if (rawText.Contains("|")) rawText = rawText.Split('|')[0]; }
+                        else if (!string.IsNullOrWhiteSpace(sName) && !sName.ToLower().Contains("nova a")) rawText = sName;
+                        else rawText = "carregamento atual";
                         if (rawText.Length > 25) rawText = rawText.Substring(0, 25).Trim();
                         role = "document";
                     }
@@ -135,11 +121,8 @@ namespace LiteAutomation.Generators.CSharp
                 string humanName = SemanticNlpEngine.GenerateHumanReadable(rawText, role);
                 string camelCaseName = SemanticNlpEngine.GenerateVariableName(rawText, role);
 
-                bool isFemaleTarget = humanName.StartsWith(LanguageManager.GetString("NlpScreen")) ||
-                                      humanName.StartsWith(LanguageManager.GetString("NlpPage")) ||
-                                      humanName.StartsWith(LanguageManager.GetString("NlpList"));
+                bool isFemaleTarget = humanName.StartsWith(LanguageManager.GetString("NlpScreen")) || humanName.StartsWith(LanguageManager.GetString("NlpPage")) || humanName.StartsWith(LanguageManager.GetString("NlpList"));
 
-                // 🚀 FIX 2: Garante que seletores vazios de validação não se chamem "ElGenerico" mas sim "Tela"
                 string locLower = intent.TargetLocator?.ToLower() ?? "";
                 bool isGhostElement = locLower.Contains("body") || role == "document" ||
                                       string.IsNullOrEmpty(intent.TargetLocator) ||
@@ -194,7 +177,7 @@ namespace LiteAutomation.Generators.CSharp
                     ErrorMsg = intent.FriendlyErrorMessage,
                     StepId = intent.StepId,
                     Diagnostics = intent.Diagnostics,
-                    ActionCode = GenerateActionCode(intent, FormatLocator(intent.TargetLocator), camelCaseName)
+                    ActionCode = GenerateJavaActionCode(intent, FormatJavaLocator(intent.TargetLocator), camelCaseName)
                 };
 
                 switch (intent.Type)
@@ -220,8 +203,8 @@ namespace LiteAutomation.Generators.CSharp
                         args[2] = varName;
 
                         step.GherkinText = isCanonical ? string.Format(LanguageManager.GetString("BddInputCanon"), args) : string.Format(LanguageManager.GetString("BddInputNarr"), args);
-                        step.StepDefText = (isCanonical ? string.Format(LanguageManager.GetString("BddInputDefCanon"), args) : string.Format(LanguageManager.GetString("BddInputDefNarr"), args)) + "\"\"(.*)\"\"";
-                        step.MethodParams = $"string {varName}";
+                        step.StepDefText = (isCanonical ? string.Format(LanguageManager.GetString("BddInputDefCanon"), args) : string.Format(LanguageManager.GetString("BddInputDefNarr"), args)) + "\"{string}\"";
+                        step.MethodParams = $"String {varName}";
                         step.ActionCode = step.ActionCode.Replace($"\"{intent.Value.Replace("\"", "\\\"")}\"", varName);
                         break;
                     case IntentType.WaitUrlChange:
@@ -314,7 +297,7 @@ namespace LiteAutomation.Generators.CSharp
             }
 
             sb.AppendLine("// =====================================================================");
-            sb.AppendLine($"// 🥒 {LanguageManager.GetString("LblPattern").ToUpper()}: BDD ({(isCanonical ? LanguageManager.GetString("RdoCanonical").ToUpper() : LanguageManager.GetString("RdoNarrative").ToUpper())})");
+            sb.AppendLine($"// 🥒 {LanguageManager.GetString("LblPattern").ToUpper()}: BDD JAVA ({(isCanonical ? LanguageManager.GetString("RdoCanonical").ToUpper() : LanguageManager.GetString("RdoNarrative").ToUpper())})");
             sb.AppendLine("// =====================================================================");
             sb.AppendLine($"/*\nFeature: {LanguageManager.GetString("BddFeatureTitle")}");
 
@@ -332,16 +315,35 @@ namespace LiteAutomation.Generators.CSharp
             }
             sb.AppendLine("*/\n");
 
-            sb.AppendLine("using System;\nusing TechTalk.SpecFlow;\nusing OpenQA.Selenium;\nusing OpenQA.Selenium.Chrome;\nusing OpenQA.Selenium.Support.UI;\nusing NUnit.Framework;\n");
-            sb.AppendLine("namespace LiteAutomation.GeneratedTests.BDD\n{");
-            sb.AppendLine($"    [Binding]");
-            sb.AppendLine($"    public class {testClassName}Steps");
-            sb.AppendLine($"    {{");
-            sb.AppendLine($"        private IWebDriver driver;");
-            sb.AppendLine($"        private WebDriverWait wait;");
+            sb.AppendLine("package liteautomation.generatedtests.bdd;\n");
+            sb.AppendLine("import io.cucumber.java.pt.*;");
+            sb.AppendLine("import io.cucumber.java.Before;");
+            sb.AppendLine("import io.cucumber.java.After;");
+            sb.AppendLine("import org.openqa.selenium.*;");
+            sb.AppendLine("import org.openqa.selenium.chrome.ChromeDriver;");
+            sb.AppendLine("import org.openqa.selenium.chrome.ChromeOptions;");
+            sb.AppendLine("import org.openqa.selenium.support.ui.WebDriverWait;");
+            sb.AppendLine("import org.openqa.selenium.support.ui.ExpectedConditions;");
+            sb.AppendLine("import org.junit.Assert;");
+            sb.AppendLine("import java.time.Duration;\n");
+
+            sb.AppendLine($"public class {testClassName}Steps {{");
+            sb.AppendLine($"    private WebDriver driver;");
+            sb.AppendLine($"    private WebDriverWait wait;");
             sb.AppendLine();
-            sb.AppendLine($"        [BeforeScenario]\n        public void Setup()\n        {{\n            var options = new ChromeOptions();\n            options.AddArgument(\"--disable-blink-features=AutomationControlled\");\n            driver = new ChromeDriver(options);\n            driver.Manage().Window.Maximize();\n            wait = new WebDriverWait(driver, TimeSpan.FromSeconds(10));\n        }}\n");
-            sb.AppendLine($"        [AfterScenario]\n        public void Teardown()\n        {{\n            driver?.Dispose();\n        }}\n");
+            sb.AppendLine($"    @Before");
+            sb.AppendLine($"    public void setup() {{");
+            sb.AppendLine($"        ChromeOptions options = new ChromeOptions();");
+            sb.AppendLine($"        options.addArguments(\"--disable-blink-features=AutomationControlled\");");
+            sb.AppendLine($"        driver = new ChromeDriver(options);");
+            sb.AppendLine($"        driver.manage().window().maximize();");
+            sb.AppendLine($"        wait = new WebDriverWait(driver, Duration.ofSeconds(10));");
+            sb.AppendLine($"    }}\n");
+
+            sb.AppendLine($"    @After");
+            sb.AppendLine($"    public void teardown() {{");
+            sb.AppendLine($"        if (driver != null) driver.quit();");
+            sb.AppendLine($"    }}\n");
 
             var uniqueStepDefs = new HashSet<string>();
 
@@ -356,34 +358,33 @@ namespace LiteAutomation.Generators.CSharp
                 }
                 uniqueStepDefs.Add(safeMethodName);
 
-                sb.AppendLine($"        [{step.StepDefAttribute}(@\"{step.StepDefText}\")]");
-                sb.AppendLine($"        public void {safeMethodName}({step.MethodParams})");
-                sb.AppendLine($"        {{");
+                string javaAnnotation = Capitalize(step.StepDefAttribute);
+                sb.AppendLine($"    @{javaAnnotation}(\"{step.StepDefText}\")");
+                sb.AppendLine($"    public void {Char.ToLower(safeMethodName[0]) + safeMethodName.Substring(1)}({step.MethodParams}) {{");
 
-                sb.AppendLine($"            // {LanguageManager.GetString("LogStep")} {step.StepId}");
+                sb.AppendLine($"        // {LanguageManager.GetString("LogStep")} {step.StepId}");
                 if (config.IncludeReport && !string.IsNullOrWhiteSpace(step.Diagnostics))
-                    sb.AppendLine($"            {step.Diagnostics}");
+                    sb.AppendLine($"        {step.Diagnostics}");
 
                 if (!string.IsNullOrEmpty(step.ErrorMsg))
                 {
-                    sb.AppendLine($"            try\n            {{");
+                    sb.AppendLine($"        try {{");
                     foreach (var line in step.ActionCode.Split('\n'))
-                        if (!string.IsNullOrWhiteSpace(line)) sb.AppendLine($"                {line.TrimEnd()}");
+                        if (!string.IsNullOrWhiteSpace(line)) sb.AppendLine($"            {line.TrimEnd()}");
 
-                    sb.AppendLine($"            }}\n            catch (WebDriverTimeoutException)\n            {{");
-                    sb.AppendLine($"                Assert.Fail(\"{step.ErrorMsg}\");\n            }}");
+                    sb.AppendLine($"        }} catch (Exception e) {{");
+                    sb.AppendLine($"            Assert.fail(\"{step.ErrorMsg}\");");
+                    sb.AppendLine($"        }}");
                 }
                 else if (!string.IsNullOrEmpty(step.ActionCode))
                 {
                     foreach (var line in step.ActionCode.Split('\n'))
-                        if (!string.IsNullOrWhiteSpace(line)) sb.AppendLine($"            {line.TrimEnd()}");
+                        if (!string.IsNullOrWhiteSpace(line)) sb.AppendLine($"        {line.TrimEnd()}");
                 }
 
-                sb.AppendLine($"        }}");
-                sb.AppendLine();
+                sb.AppendLine($"    }}\n");
             }
 
-            sb.AppendLine($"    }}");
             sb.AppendLine($"}}");
 
             return sb.ToString();
@@ -402,35 +403,35 @@ namespace LiteAutomation.Generators.CSharp
             return varName;
         }
 
-        private string GenerateActionCode(AutomationIntent intent, string loc, string varName)
+        // 🚀 AQUI ESTÁ O FIX: {{block: 'center'}}
+        private string GenerateJavaActionCode(AutomationIntent intent, string loc, string varName)
         {
             switch (intent.Type)
             {
-                case IntentType.NavigateToUrl: return $"driver.Navigate().GoToUrl(\"{intent.Value}\");";
-                case IntentType.WaitUrlChange: return $"wait.Until(d => d.Url.Contains(\"{intent.Value}\"));";
-                case IntentType.Click: return $"var {varName} = wait.Until(d => d.FindElement({loc}));\n((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].scrollIntoView({{block: 'center'}});\", {varName});\ntry\n{{\n    {varName}.Click();\n}}\ncatch\n{{\n    ((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].click();\", {varName});\n}}";
-                case IntentType.Hover: return $"var {varName} = wait.Until(d => d.FindElement({loc}));\nnew OpenQA.Selenium.Interactions.Actions(driver).MoveToElement({varName}).Perform();";
-                case IntentType.Blur: return $"driver.FindElement(By.TagName(\"body\")).Click();";
-                case IntentType.InputText: return $"var {varName} = wait.Until(d => d.FindElement({loc}));\n{varName}.Clear();\n{varName}.SendKeys(\"{intent.Value.Replace("\"", "\\\"")}\");";
-                case IntentType.KeyPress: return $"wait.Until(d => d.FindElement({loc})).SendKeys({MapKey(intent.Key)});";
-                case IntentType.ScrollTo: return $"var {varName} = wait.Until(d => d.FindElement({loc}));\n((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].scrollIntoView({{block: 'center'}});\", {varName});";
-                case IntentType.AssertVisible: return $"Assert.IsTrue(wait.Until(d => d.FindElement({loc})).Displayed);";
-                case IntentType.AssertEnabled: return $"wait.Until(d => d.FindElement({loc}).Enabled);";
+                case IntentType.NavigateToUrl: return $"driver.get(\"{intent.Value}\");";
+                case IntentType.WaitUrlChange: return $"wait.until(ExpectedConditions.urlContains(\"{intent.Value}\"));";
+                case IntentType.Click: return $"WebElement {varName} = wait.until(ExpectedConditions.presenceOfElementLocated({loc}));\n((JavascriptExecutor)driver).executeScript(\"arguments[0].scrollIntoView({{block: 'center'}});\", {varName});\nwait.until(ExpectedConditions.elementToBeClickable({varName}));\ntry {{\n    {varName}.click();\n}} catch (Exception e) {{\n    ((JavascriptExecutor)driver).executeScript(\"arguments[0].click();\", {varName});\n}}";
+                case IntentType.Hover: return $"WebElement {varName} = wait.until(ExpectedConditions.presenceOfElementLocated({loc}));\nnew org.openqa.selenium.interactions.Actions(driver).moveToElement({varName}).perform();";
+                case IntentType.Blur: return $"driver.findElement(By.tagName(\"body\")).click();";
+                case IntentType.InputText: return $"WebElement {varName} = wait.until(ExpectedConditions.presenceOfElementLocated({loc}));\n{varName}.clear();\n{varName}.sendKeys(\"{intent.Value.Replace("\"", "\\\"")}\");";
+                case IntentType.KeyPress: return $"wait.until(ExpectedConditions.presenceOfElementLocated({loc})).sendKeys({MapJavaKey(intent.Key)});";
+                case IntentType.ScrollTo: return $"WebElement {varName} = wait.until(ExpectedConditions.presenceOfElementLocated({loc}));\n((JavascriptExecutor)driver).executeScript(\"arguments[0].scrollIntoView({{block: 'center'}});\", {varName});";
+                case IntentType.AssertVisible: return $"Assert.assertTrue(wait.until(ExpectedConditions.presenceOfElementLocated({loc})).isDisplayed());";
+                case IntentType.AssertEnabled: return $"Assert.assertTrue(wait.until(ExpectedConditions.presenceOfElementLocated({loc})).isEnabled());";
                 default: return "";
             }
         }
 
-        private string FormatLocator(string loc)
+        private string FormatJavaLocator(string loc)
         {
-            // 🚀 FIX 3: Transforma qualquer string vazia ou corrompida no Body com segurança
             if (string.IsNullOrEmpty(loc) || loc.Contains("VAZIO") || loc.Contains("NÃO ENCONTRADO") || loc.Contains("AMBÍGUO"))
-                return "By.TagName(\"body\")";
+                return "By.tagName(\"body\")";
             if (loc.StartsWith("By.") || loc.StartsWith("Page.")) return loc;
-            if (loc.StartsWith("/") || loc.StartsWith("(")) return $"By.XPath(\"{loc}\")";
-            return $"By.CssSelector(\"{loc}\")";
+            if (loc.StartsWith("/") || loc.StartsWith("(")) return $"By.xpath(\"{loc}\")";
+            return $"By.cssSelector(\"{loc}\")";
         }
 
-        private string MapKey(string key) => key.ToLower() switch { "enter" => "Keys.Enter", "tab" => "Keys.Tab", "escape" => "Keys.Escape", "space" => "Keys.Space", _ => $"\"{key}\"" };
+        private string MapJavaKey(string key) => key.ToLower() switch { "enter" => "Keys.ENTER", "tab" => "Keys.TAB", "escape" => "Keys.ESCAPE", "space" => "Keys.SPACE", _ => $"\"{key}\"" };
         private string Capitalize(string text) { if (string.IsNullOrEmpty(text)) return text; return char.ToUpper(text[0]) + text.Substring(1); }
         private string RemoveAccents(string text)
         {

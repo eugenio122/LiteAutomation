@@ -9,6 +9,7 @@ using LiteAutomation.Core;
 using LiteAutomation.DTOs;
 using LiteAutomation.Enums;
 using LiteAutomation.Diagnostics;
+using LiteTools.Core.Languages;
 
 namespace LiteAutomation.UI
 {
@@ -28,7 +29,6 @@ namespace LiteAutomation.UI
 
         private ComboBox cmbPlatform, cmbStrategy, cmbPattern, cmbFramework, cmbLanguage;
 
-        // 🚀 NOVOS CONTROLES
         private CheckBox chkReport;
         private Panel pnlBddStyle;
         private RadioButton rdoNarrative;
@@ -45,17 +45,31 @@ namespace LiteAutomation.UI
         {
             public int SplitterDistance { get; set; } = 850;
             public bool IsPinned { get; set; } = false;
+            // 🚀 Propriedade que vai para o JSON
+            public string Language { get; set; } = "pt-BR";
         }
 
         private UIPreferences _uiPrefs;
 
-        public LiteAutomationSettingsUI(string currentLanguage)
+        public LiteAutomationSettingsUI(string hostLanguage)
         {
-            _currentLanguage = currentLanguage;
             _currentConfig = new GeneratorConfig();
             _workspace = new WorkspaceState();
 
             LoadUIPreferences();
+
+            // 🚀 LÓGICA DE SINCRONIZAÇÃO BLINDADA
+            // Se o idioma enviado pela Nave-Mãe for diferente do que temos no JSON, atualizamos o JSON!
+            if (!string.IsNullOrEmpty(hostLanguage) && _uiPrefs.Language != hostLanguage)
+            {
+                _uiPrefs.Language = hostLanguage;
+                SaveUIPreferences();
+            }
+
+            // Define o idioma atual com base na preferência consolidada
+            _currentLanguage = _uiPrefs.Language ?? "pt-BR";
+            LanguageManager.CurrentLanguage = _currentLanguage;
+
             InitializeComponent();
             InitializeMatrix();
         }

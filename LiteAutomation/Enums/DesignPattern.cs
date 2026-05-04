@@ -11,11 +11,6 @@
         Linear,
 
         /// <summary>
-        /// Separa a lógica de testes da lógica de mapeamento de telas.
-        /// </summary>
-        Page_Object_Model,
-
-        /// <summary>
         /// Escrita de testes orientada a comportamento (Given, When, Then).
         /// </summary>
         BDD_Gherkin,

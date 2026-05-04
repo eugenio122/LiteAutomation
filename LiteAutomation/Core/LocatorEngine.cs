@@ -3,17 +3,14 @@ using System.Linq;
 using System.Text;
 using LiteAutomation.DTOs;
 using LiteAutomation.Enums;
+using LiteTools.Core.Languages;
 
 namespace LiteAutomation.Core
 {
     public static class LocatorEngine
     {
-        // =====================================================================
-        // O MOTOR DE DIAGNÓSTICO (Comentários Inteligentes no Preview/Report)
-        // =====================================================================
         public static string GetDiagnostics(MicroStepDto micro, AutomationStrategy strategy, string indent = "            ")
         {
-            // O Report detalhado de seletores só faz sentido na estratégia Smart Selector (Web)
             if (strategy != AutomationStrategy.Smart_Selector) return "";
 
             var sb = new StringBuilder();
@@ -26,29 +23,24 @@ namespace LiteAutomation.Core
 
             if (allFlags.Count > 0)
             {
-                sb.AppendLine($"{indent}// 🚩 Quality Flags: {string.Join(", ", allFlags)}");
+                sb.AppendLine($"{indent}{string.Format(LanguageManager.GetString("DiagQualityFlags"), string.Join(", ", allFlags))}");
             }
 
-            // Avalia o lado Semântico
             if (uiaFlags.Contains("A11Y_GAP_WARNING") || uiaFlags.Contains("MISSING_ACCESSIBLE_NAME"))
             {
-                sb.AppendLine($"{indent}// ⚠️ ALERTA SEMÂNTICO: O elemento não possui acessibilidade adequada.");
-                sb.AppendLine($"{indent}// 💡 Sugestão Automática: O Smart Selector priorizou atributos DOM confiáveis.");
+                sb.AppendLine($"{indent}{LanguageManager.GetString("DiagSemanticAlert")}");
+                sb.AppendLine($"{indent}{LanguageManager.GetString("DiagSemanticSuggestion")}");
             }
 
-            // Avalia o lado DOM
             if (bidiFlags.Contains("WARNING_BRITTLE_LOCATOR") || bidiFlags.Contains("WARNING_AMBIGUOUS_LOCATOR") || bidiFlags.Count == 0)
             {
-                sb.AppendLine($"{indent}// ⚠️ ALERTA DOM: A estrutura HTML do elemento é frágil ou ambígua.");
-                sb.AppendLine($"{indent}// 💡 Sugestão Automática: O Smart Selector priorizou as tags de acessibilidade (ARIA/Role).");
+                sb.AppendLine($"{indent}{LanguageManager.GetString("DiagDomAlert")}");
+                sb.AppendLine($"{indent}{LanguageManager.GetString("DiagDomSuggestion")}");
             }
 
             return sb.ToString().TrimEnd('\r', '\n');
         }
 
-        // =====================================================================
-        // RESOLUÇÃO DE FALLBACK E POLIGLOTISMO
-        // =====================================================================
         public static string GetBestPlaywrightLocator(SelectorSetDto? selectorSet)
         {
             string safeValue = GetBestRawLocator(selectorSet);
@@ -68,7 +60,7 @@ namespace LiteAutomation.Core
 
         public static string GetBestRawLocator(SelectorSetDto? selectorSet)
         {
-            if (selectorSet == null) return "/* SELETOR NÃO ENCONTRADO */";
+            if (selectorSet == null) return LanguageManager.GetString("LocNotFound");
 
             var candidates = new List<LocatorData>();
             AddIfValid(candidates, selectorSet.CustomAttribute);
@@ -83,11 +75,9 @@ namespace LiteAutomation.Core
             AddIfValid(candidates, selectorSet.XpathRelative);
             AddIfValid(candidates, selectorSet.XpathAbsolute);
 
-            if (candidates.Count == 0) return "/* TODOS OS SELETORES ESTÃO AMBÍGUOS OU VAZIOS */";
+            if (candidates.Count == 0) return LanguageManager.GetString("LocAmbiguous");
 
             var bestLocator = candidates.OrderByDescending(c => c.Confidence).First();
-
-            // 🚀 CORREÇÃO PRESERVADA: Troca universal de aspas duplas por aspas simples!
             return bestLocator.Value!.Replace("\"", "'");
         }
 

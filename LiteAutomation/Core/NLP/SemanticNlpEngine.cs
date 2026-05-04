@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using LiteTools.Core.Languages; // 🚀 Injeção do LanguageManager
 
 namespace LiteAutomation.Core.NLP
 {
@@ -11,11 +12,12 @@ namespace LiteAutomation.Core.NLP
         /// <summary>
         /// Gera o nome de variável seguro para código (ex: btnEntrarSemSenha).
         /// </summary>
-        public static string GenerateVariableName(string rawText, string role, string languageCode = "pt-BR")
+        public static string GenerateVariableName(string rawText, string role)
         {
-            var (cleanedWords, semanticPrefix) = ProcessPipeline(rawText, role, languageCode);
+            var (cleanedWords, semanticPrefix) = ProcessPipeline(rawText, role);
 
-            if (cleanedWords.Length == 0) return $"{semanticPrefix}Generico";
+            // Usa o fallback traduzido (ex: btnGenerico, btnGeneric)
+            if (cleanedWords.Length == 0) return $"{semanticPrefix}{LanguageManager.GetString("NlpGenericVar")}";
 
             string camelCaseName = string.Join("", cleanedWords.Select(Capitalize));
             return $"{semanticPrefix}{camelCaseName}";
@@ -24,12 +26,13 @@ namespace LiteAutomation.Core.NLP
         /// <summary>
         /// Gera o texto fluido para o Gherkin (ex: botão entrar sem senha).
         /// </summary>
-        public static string GenerateHumanReadable(string rawText, string role, string languageCode = "pt-BR")
+        public static string GenerateHumanReadable(string rawText, string role)
         {
-            var (cleanedWords, semanticPrefix) = ProcessPipeline(rawText, role, languageCode);
-            string humanPrefix = GetHumanPrefix(semanticPrefix, languageCode);
+            var (cleanedWords, semanticPrefix) = ProcessPipeline(rawText, role);
+            string humanPrefix = GetHumanPrefix(semanticPrefix);
 
-            if (cleanedWords.Length == 0) return $"{humanPrefix}genérico";
+            // Usa o fallback traduzido (ex: botão genérico, generic button)
+            if (cleanedWords.Length == 0) return $"{humanPrefix}{LanguageManager.GetString("NlpGenericHuman")}";
 
             string cleanText = string.Join(" ", cleanedWords);
             return $"{humanPrefix}{cleanText}";
@@ -38,7 +41,7 @@ namespace LiteAutomation.Core.NLP
         // =====================================================================
         // O PIPELINE DE 4 PASSOS
         // =====================================================================
-        private static (string[] words, string prefix) ProcessPipeline(string rawText, string role, string languageCode)
+        private static (string[] words, string prefix) ProcessPipeline(string rawText, string role)
         {
             if (string.IsNullOrWhiteSpace(rawText)) rawText = "";
 
@@ -47,8 +50,8 @@ namespace LiteAutomation.Core.NLP
             normalized = Regex.Replace(normalized, @"[^a-z0-9\s]", " "); // Troca símbolos por espaço
             normalized = Regex.Replace(normalized, @"\s+", " ").Trim(); // Remove múltiplos espaços
 
-            // Passo 2: Filtro de Stop-Words
-            var stopWords = StopWordsManager.GetStopWords(languageCode);
+            // 🚀 Passo 2: Filtro de Stop-Words (Agora consome o idioma global do LanguageManager)
+            var stopWords = StopWordsManager.GetStopWords(LanguageManager.CurrentLanguage);
             var allWords = normalized.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             var filteredWords = allWords.Where(w => !stopWords.Contains(w)).ToArray();
 
@@ -60,10 +63,10 @@ namespace LiteAutomation.Core.NLP
             string safeRole = (role ?? "").ToLower();
             string semanticPrefix = "el";
 
-            if (safeRole.Contains("button") || safeRole.Contains("botão")) semanticPrefix = "btn";
-            else if (safeRole.Contains("textbox") || safeRole.Contains("input") || safeRole.Contains("texto")) semanticPrefix = "input";
-            else if (safeRole.Contains("link") || safeRole == "a") semanticPrefix = "link";
-            else if (safeRole.Contains("combobox") || safeRole.Contains("select") || safeRole.Contains("lista")) semanticPrefix = "combo";
+            if (safeRole.Contains("button") || safeRole.Contains("botão") || safeRole.Contains("botón") || safeRole.Contains("bouton")) semanticPrefix = "btn";
+            else if (safeRole.Contains("textbox") || safeRole.Contains("input") || safeRole.Contains("texto") || safeRole.Contains("field")) semanticPrefix = "input";
+            else if (safeRole.Contains("link") || safeRole == "a" || safeRole.Contains("enlace") || safeRole.Contains("lien")) semanticPrefix = "link";
+            else if (safeRole.Contains("combobox") || safeRole.Contains("select") || safeRole.Contains("lista") || safeRole.Contains("dropdown")) semanticPrefix = "combo";
 
             return (filteredWords, semanticPrefix);
         }
@@ -71,21 +74,17 @@ namespace LiteAutomation.Core.NLP
         // =====================================================================
         // UTILITÁRIOS
         // =====================================================================
-        private static string GetHumanPrefix(string codePrefix, string languageCode)
+        private static string GetHumanPrefix(string codePrefix)
         {
-            // Simplificado para PT-BR por padrão, expansível posteriormente.
-            if (languageCode.StartsWith("pt"))
+            // 🚀 Busca do Dicionário Multi-idioma
+            return codePrefix switch
             {
-                return codePrefix switch
-                {
-                    "btn" => "botão ",
-                    "input" => "campo ",
-                    "link" => "link ",
-                    "combo" => "lista ",
-                    _ => "elemento "
-                };
-            }
-            return codePrefix switch { "btn" => "button ", "input" => "field ", "link" => "link ", "combo" => "dropdown ", _ => "element " };
+                "btn" => LanguageManager.GetString("NlpBtn"),
+                "input" => LanguageManager.GetString("NlpInput"),
+                "link" => LanguageManager.GetString("NlpLink"),
+                "combo" => LanguageManager.GetString("NlpCombo"),
+                _ => LanguageManager.GetString("NlpElement")
+            };
         }
 
         private static string RemoveDiacritics(string text)

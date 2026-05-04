@@ -1,6 +1,7 @@
 ﻿using System.Drawing;
 using System.Windows.Forms;
 using FastColoredTextBoxNS;
+using LiteTools.Core.Languages; // 🚀 Injeção do LanguageManager
 
 namespace LiteAutomation.UI
 {
@@ -90,13 +91,13 @@ namespace LiteAutomation.UI
 
             if (splitContainer.IsSplitterFixed)
             {
-                btnPinPanel.Text = "🔓 Desfixar";
+                btnPinPanel.Text = LanguageManager.GetString("BtnUnpinPanel"); // 🚀 Tradução aqui
                 btnPinPanel.BackColor = Color.FromArgb(40, 167, 69);
                 btnPinPanel.ForeColor = Color.White;
             }
             else
             {
-                btnPinPanel.Text = "📌 Fixar";
+                btnPinPanel.Text = LanguageManager.GetString("BtnPinPanel");   // 🚀 Tradução aqui
                 btnPinPanel.BackColor = _isDarkMode ? Color.FromArgb(60, 60, 60) : Color.LightGray;
                 btnPinPanel.ForeColor = _isDarkMode ? Color.White : Color.Black;
             }

@@ -36,7 +36,6 @@ namespace LiteAutomation.Factories
                     if (config.Pattern == DesignPattern.Linear) return new CypressLinearJsGenerator();
 
                     // TODO (Treino C): Implementar BDD e POM para Cypress
-                    // if (config.Pattern == DesignPattern.Page_Object_Model) return new CypressPomJsGenerator();
                     // if (config.Pattern == DesignPattern.BDD_Gherkin) return new CypressBddJsGenerator();
                     // if (config.Pattern == DesignPattern.BDD_POM_Hybrid) return new CypressBddPomJsGenerator();
 
@@ -44,16 +43,13 @@ namespace LiteAutomation.Factories
                 }
 
                 // -----------------------------------------------------
-                // 🔴 TRADUTORES PARA SELENIUM (JAVA)
+                // 🔴 TRADUTORES PARA SELENIUM (JAVA) - CONCLUÍDO (Treino B)
                 // -----------------------------------------------------
                 if (config.Framework == TestFramework.Selenium && config.Language == ScriptLanguage.Java)
                 {
                     if (config.Pattern == DesignPattern.Linear) return new SeleniumLinearJavaGenerator();
-
-                    // TODO (Treino B): Implementar as arquiteturas para Java (Faremos depois)
-                    // if (config.Pattern == DesignPattern.Page_Object_Model) return new SeleniumPomJavaGenerator();
-                    // if (config.Pattern == DesignPattern.BDD_Gherkin) return new SeleniumBddJavaGenerator();
-                    // if (config.Pattern == DesignPattern.BDD_POM_Hybrid) return new SeleniumBddPomJavaGenerator();
+                    if (config.Pattern == DesignPattern.BDD_Gherkin) return new SeleniumBddJavaGenerator();
+                    if (config.Pattern == DesignPattern.BDD_POM_Hybrid) return new SeleniumBddPomJavaGenerator();
 
                     throw new NotImplementedException($"A arquitetura {config.Pattern} ainda não foi implementada para Java.");
                 }
@@ -64,7 +60,6 @@ namespace LiteAutomation.Factories
                 if (config.Framework == TestFramework.Selenium && config.Language == ScriptLanguage.CSharp)
                 {
                     if (config.Pattern == DesignPattern.Linear) return new SeleniumLinearCSharpGenerator();
-                    if (config.Pattern == DesignPattern.Page_Object_Model) return new SeleniumPomCSharpGenerator();
                     if (config.Pattern == DesignPattern.BDD_Gherkin) return new SeleniumBddCSharpGenerator();
                     if (config.Pattern == DesignPattern.BDD_POM_Hybrid) return new SeleniumBddPomCSharpGenerator();
                 }

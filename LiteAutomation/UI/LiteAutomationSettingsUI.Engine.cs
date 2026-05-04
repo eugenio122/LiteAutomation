@@ -8,6 +8,7 @@ using LiteAutomation.Enums;
 using LiteAutomation.Factories;
 using LiteAutomation.Diagnostics;
 using FastColoredTextBoxNS;
+using LiteTools.Core.Languages;
 
 namespace LiteAutomation.UI
 {
@@ -70,7 +71,7 @@ namespace LiteAutomation.UI
 
                                 if (uia != null && !string.IsNullOrWhiteSpace(uia.Semantic?.AccessibleName?.Value))
                                 {
-                                    string role = uia.Semantic.Role?.Value?.ToLower() ?? "elemento";
+                                    string role = uia.Semantic.Role?.Value?.ToLower() ?? LanguageManager.GetString("SdetElement");
                                     string rawName = uia.Semantic.AccessibleName.Value.Replace("\"", "'").Replace("\n", " ").Replace("\r", "");
                                     string shortName = rawName.Length > 35 ? rawName.Substring(0, 35).Trim() : rawName;
                                     int score = uia.Semantic.AccessibleName.Confidence >= 0 ? uia.Semantic.AccessibleName.Confidence : 80;
@@ -79,7 +80,7 @@ namespace LiteAutomation.UI
                                     if (uia.Semantic.AutomationId?.Value == "RootWebArea" || role == "documento" || role == "região")
                                     {
                                         codeSnippet = isPlaywright ? "Page.Locator(\"body\")" : "By.TagName(\"body\")";
-                                        baseOptions.Add(new LocatorOption { Category = "SEMÂNTICO", Name = "Fundo da Tela (Body)", CodeSnippet = codeSnippet, Confidence = 100, IsSemantic = true });
+                                        baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatSemantic"), Name = LanguageManager.GetString("SdetBgBody"), CodeSnippet = codeSnippet, Confidence = 100, IsSemantic = true });
                                     }
                                     else
                                     {
@@ -90,38 +91,41 @@ namespace LiteAutomation.UI
                                                 ? $"By.XPath(\"//*[contains(@aria-label, '{shortName}') or contains(text(), '{shortName}')]\")"
                                                 : $"By.XPath(\"//*[@aria-label='{rawName}' or text()='{rawName}']\")";
 
-                                        baseOptions.Add(new LocatorOption { Category = "SEMÂNTICO", Name = $"{role} '{shortName}'", CodeSnippet = codeSnippet, Confidence = score, IsSemantic = true });
+                                        baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatSemantic"), Name = $"{role} '{shortName}'", CodeSnippet = codeSnippet, Confidence = score, IsSemantic = true });
                                     }
                                 }
 
                                 if (bidi?.SelectorSet != null)
                                 {
                                     AddOptionFromBidi(baseOptions, bidi.SelectorSet, isPlaywright);
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.CustomAttribute, "Atributo Custom", isPlaywright, "Page.Locator(\"{0}\")", "By.CssSelector(\"{0}\")", false, "DOM");
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Id, "ID", isPlaywright, "Page.Locator(\"{0}\")", "By.CssSelector(\"{0}\")", false, "DOM");
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Name, "Name", isPlaywright, "Page.Locator(\"{0}\")", "By.CssSelector(\"{0}\")", false, "DOM");
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Text, "Texto Visível", isPlaywright, "Page.Locator(\"xpath={0}\")", "By.XPath(\"{0}\")", false, "DOM");
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Css, "CSS", isPlaywright, "Page.Locator(\"css={0}\")", "By.CssSelector(\"{0}\")", false, "DOM");
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.XpathAbsolute, "XPath Absoluto", isPlaywright, "Page.Locator(\"xpath={0}\")", "By.XPath(\"{0}\")", false, "DOM");
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.AriaLabel, "Aria-Label", isPlaywright, "Page.Locator(\"css={0}\")", "By.CssSelector(\"{0}\")", true, "SEMÂNTICO");
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.CustomAttribute, LanguageManager.GetString("SdetCustomAttr"), isPlaywright, "Page.Locator(\"{0}\")", "By.CssSelector(\"{0}\")", false, LanguageManager.GetString("CatDom"));
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Id, "ID", isPlaywright, "Page.Locator(\"{0}\")", "By.CssSelector(\"{0}\")", false, LanguageManager.GetString("CatDom"));
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Name, "Name", isPlaywright, "Page.Locator(\"{0}\")", "By.CssSelector(\"{0}\")", false, LanguageManager.GetString("CatDom"));
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Text, LanguageManager.GetString("SdetVisibleText"), isPlaywright, "Page.Locator(\"xpath={0}\")", "By.XPath(\"{0}\")", false, LanguageManager.GetString("CatDom"));
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Css, "CSS", isPlaywright, "Page.Locator(\"css={0}\")", "By.CssSelector(\"{0}\")", false, LanguageManager.GetString("CatDom"));
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.XpathRelative, LanguageManager.GetString("SdetRelativeXPath"), isPlaywright, "Page.Locator(\"xpath={0}\")", "By.XPath(\"{0}\")", false, LanguageManager.GetString("CatDom"));
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.XpathAbsolute, LanguageManager.GetString("SdetAbsoluteXPath"), isPlaywright, "Page.Locator(\"xpath={0}\")", "By.XPath(\"{0}\")", false, LanguageManager.GetString("CatDom"));
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.AriaLabel, "Aria-Label", isPlaywright, "Page.Locator(\"css={0}\")", "By.CssSelector(\"{0}\")", true, LanguageManager.GetString("CatSemantic"));
                                 }
 
                                 if (baseOptions.Count == 0)
-                                    baseOptions.Add(new LocatorOption { Category = "DOM", Name = "Indisponível", CodeSnippet = isPlaywright ? "Page.Locator(\"/* VAZIO */\")" : "By.XPath(\"/* VAZIO */\")", Confidence = 0, IsSemantic = false });
+                                    baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatDom"), Name = LanguageManager.GetString("SdetUnavailable"), CodeSnippet = isPlaywright ? "Page.Locator(\"/* VAZIO */\")" : "By.XPath(\"/* VAZIO */\")", Confidence = 0, IsSemantic = false });
 
                                 baseOptions = baseOptions.GroupBy(o => o.CodeSnippet).Select(g => g.First()).ToList();
                                 _locatorCache[cacheKey] = baseOptions;
                             }
 
                             var displayOptions = baseOptions.Select(o => o.Clone()).ToList();
-                            foreach (var opt in displayOptions) opt.DisplayName = $"{(opt.Category == "SEMÂNTICO" ? "🧠 SEMÂNTICO" : "⚙️ DOM")} ➔ [{opt.Confidence}] {opt.Name}";
+                            foreach (var opt in displayOptions)
+                                opt.DisplayName = $"{(opt.Category == LanguageManager.GetString("CatSemantic") ? LanguageManager.GetString("PrefixSemantic") : LanguageManager.GetString("PrefixDom"))} ➔ [{opt.Confidence}] {opt.Name}";
+
                             displayOptions = displayOptions.OrderByDescending(o => o.Confidence).ThenByDescending(o => o.IsSemantic).ToList();
 
                             int rowIndex = gridLocators.Rows.Add();
                             var row = gridLocators.Rows[rowIndex];
 
                             row.Cells[0].Value = displayStep;
-                            row.Cells[1].Value = micro.ActionType?.Replace("keypress_", "tecla_") ?? "click";
+                            row.Cells[1].Value = micro.ActionType?.Replace("keypress_", LanguageManager.GetString("SdetKey")) ?? "click";
 
                             var comboCell = (DataGridViewComboBoxCell)row.Cells[2];
                             comboCell.DataSource = displayOptions;
@@ -144,18 +148,18 @@ namespace LiteAutomation.UI
                         {
                             baseOptions = new List<LocatorOption>();
                             string codeSnippet = isPlaywright ? "Page.Locator(\"body\")" : "By.TagName(\"body\")";
-                            baseOptions.Add(new LocatorOption { Category = "SEMÂNTICO", Name = "Validação da Tela (Body)", CodeSnippet = codeSnippet, Confidence = 100, IsSemantic = true });
+                            baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatSemantic"), Name = LanguageManager.GetString("SdetValidationBody"), CodeSnippet = codeSnippet, Confidence = 100, IsSemantic = true });
                             _locatorCache[cacheKey] = baseOptions;
                         }
 
                         var displayOptions = baseOptions.Select(o => o.Clone()).ToList();
-                        foreach (var opt in displayOptions) opt.DisplayName = $"🧠 SEMÂNTICO ➔ [{opt.Confidence}] {opt.Name}";
+                        foreach (var opt in displayOptions) opt.DisplayName = $"{LanguageManager.GetString("PrefixSemantic")} ➔ [{opt.Confidence}] {opt.Name}";
 
                         int rowIndex = gridLocators.Rows.Add();
                         var row = gridLocators.Rows[rowIndex];
 
                         row.Cells[0].Value = displayStep;
-                        row.Cells[1].Value = "evidência"; // Indica que é um passo visual
+                        row.Cells[1].Value = LanguageManager.GetString("SdetEvidence");
 
                         var comboCell = (DataGridViewComboBoxCell)row.Cells[2];
                         comboCell.DataSource = displayOptions;
@@ -167,13 +171,13 @@ namespace LiteAutomation.UI
                     }
                 }
             }
-            catch (Exception ex) { LiteLogger.Error("Erro silencioso ao preencher a Grid.", ex); }
+            catch (Exception ex) { LiteLogger.Error(LanguageManager.GetString("ErrGridPopulate"), ex); }
             finally { gridLocators.ResumeLayout(); }
         }
 
         private void AddOptionFromBidi(List<LocatorOption> list, SelectorSetDto set, bool isPlaywright)
         {
-            void TryAdd(LocatorData loc, string name) { if (loc != null && loc.Confidence >= 0) list.Add(new LocatorOption { Name = name, CodeSnippet = isPlaywright ? LocatorEngine.GetBestPlaywrightLocator(new SelectorSetDto { Id = loc }) : LocatorEngine.GetBestSeleniumLocator(new SelectorSetDto { Id = loc }), Confidence = loc.Confidence, IsSemantic = false, Category = "DOM" }); }
+            void TryAdd(LocatorData loc, string name) { if (loc != null && loc.Confidence >= 0) list.Add(new LocatorOption { Name = name, CodeSnippet = isPlaywright ? LocatorEngine.GetBestPlaywrightLocator(new SelectorSetDto { Id = loc }) : LocatorEngine.GetBestSeleniumLocator(new SelectorSetDto { Id = loc }), Confidence = loc.Confidence, IsSemantic = false, Category = LanguageManager.GetString("CatDom") }); }
             TryAdd(set.Id, "ID"); TryAdd(set.CustomAttribute, "TestID"); TryAdd(set.Name, "Name");
         }
 
@@ -212,7 +216,7 @@ namespace LiteAutomation.UI
             }
             catch (Exception ex)
             {
-                codeEditor.ReadOnly = false; codeEditor.Text = $"// ❌ ERRO: {ex.Message}"; codeEditor.ReadOnly = true;
+                codeEditor.ReadOnly = false; codeEditor.Text = $"{LanguageManager.GetString("ErrGeneration")}{ex.Message}"; codeEditor.ReadOnly = true;
             }
         }
     }

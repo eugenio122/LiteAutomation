@@ -2,35 +2,38 @@
 using System.Windows.Forms;
 using LiteAutomation.UI;
 using LiteTools.Interfaces;
+using LiteTools.Core.Languages;
 
 namespace LiteAutomation
 {
     public class LiteAutomationPlugin : ILitePlugin
     {
-        public string Name => "LiteAutomation Data Projector";
+        public string Name => "LiteAutomation";
         public string Version => "1.0.0";
 
         private ILiteHostContext? _hostContext;
         private IEventBus? _eventBus;
-        private string _language = "pt-PT";
         private LiteAutomationSettingsUI? _settingsUI;
 
-        // 🚀 O Segredo: Guardar o estado do tema da Nave-Mãe! Assume-se Escuro como padrão moderno.
+        private string _language = "pt-BR";
         private bool _isCurrentDark = true;
 
         public void Initialize(ILiteHostContext hostContext, IEventBus eventBus, string currentLanguage)
         {
             _hostContext = hostContext;
             _eventBus = eventBus;
-            _language = currentLanguage;
 
-            // Tenta descobrir o tema inicial, caso a Nave-Mãe o forneça nos metadados
+            // 🚀 Guarda o idioma recebido pela Nave-Mãe
+            _language = string.IsNullOrEmpty(currentLanguage) ? "pt-BR" : currentLanguage;
+
+            // Sincroniza globalmente
+            LanguageManager.CurrentLanguage = _language;
+
             if (_hostContext.TryGetSessionMetadata<bool>("IsDarkMode", out bool isDark))
             {
                 _isCurrentDark = isDark;
             }
 
-            // Fica à escuta de mudanças futuras
             _eventBus.Subscribe<ThemeChangedEvent>(OnThemeChanged);
         }
 
@@ -47,9 +50,8 @@ namespace LiteAutomation
         {
             if (_settingsUI == null || _settingsUI.IsDisposed)
             {
+                // 🚀 PASSAGEM EXPLÍCITA: Avisamos a UI exatamente qual é o idioma da vez
                 _settingsUI = new LiteAutomationSettingsUI(_language);
-
-                // 🚀 INJEÇÃO IMEDIATA: Aplica o tema guardado no momento em que a UI nasce!
                 _settingsUI.ApplyTheme(_isCurrentDark);
             }
             return _settingsUI;
