@@ -15,7 +15,6 @@ namespace LiteAutomation.Generators
         private static List<Assembly> _loadedAssemblies = new List<Assembly>();
         private static string? _toscaDirectory;
 
-        // 🚀 Ajustado para a nova interface do WorkspaceState
         public string GenerateCode(WorkspaceState workspace, GeneratorConfig config, string testClassName = "GeneratedTest")
         {
             var summary = new System.Text.StringBuilder();
@@ -76,7 +75,6 @@ namespace LiteAutomation.Generators
             catch { return false; }
         }
 
-        // 🚀 Atualizado para extrair a camada "Raw" da Cebola (WorkspaceState)
         public static void ExportToTsu(WorkspaceState workspace, string filePath)
         {
             if (!InitializeToscaEngine())
@@ -124,11 +122,12 @@ namespace LiteAutomation.Generators
 
                     foreach (var mainStep in steps)
                     {
-                        if (mainStep.MicroSteps == null) continue;
+                        // 🚀 NOVO: Lê diretamente da trilha de interação!
+                        if (mainStep.InteractionTrail == null) continue;
 
-                        foreach (var micro in mainStep.MicroSteps)
+                        foreach (var interaction in mainStep.InteractionTrail)
                         {
-                            testCase.CreateTestStep($"{micro.ActionType}");
+                            testCase.CreateTestStep($"{interaction.InteractionType}");
                         }
                     }
 

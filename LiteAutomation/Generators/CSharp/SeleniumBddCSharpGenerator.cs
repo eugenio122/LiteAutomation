@@ -34,10 +34,9 @@ namespace LiteAutomation.Generators.CSharp
             var examples = new Dictionary<string, string>();
             var generatedSteps = new List<StepInfo>();
 
-            // 🚀 FIX 1: Chama o DeltaAnalyzer em tempo real para captar os seletores do Painel SDET na hora!
             var analyzer = new DeltaAnalyzer();
             var validIntents = analyzer.Analyze(workspace.RawSteps, config)
-                                       .Where(i => !i.IsNewStepHeader && i.Type != IntentType.Unknown)
+                                       .Where(i => i.Type != IntentType.Unknown)
                                        .ToList();
 
             int lastActionIndex = validIntents.FindLastIndex(i =>
@@ -82,34 +81,60 @@ namespace LiteAutomation.Generators.CSharp
                     }
                 }
 
-                if (intent.Type == IntentType.NavigateToUrl || intent.Type == IntentType.WaitUrlChange)
-                {
-                    try
-                    {
-                        var uri = new Uri(intent.Value.StartsWith("http") ? intent.Value : "http://dummy" + intent.Value);
-                        string seg = uri.Segments.LastOrDefault()?.Replace("/", "").Split('?')[0];
-                        if (!string.IsNullOrEmpty(seg) && seg != "index.html")
-                        {
-                            string rawPageVar = SemanticNlpEngine.GenerateVariableName(seg, "");
-                            if (rawPageVar.StartsWith("el")) rawPageVar = rawPageVar.Substring(2);
-                            currentPageName = Capitalize(rawPageVar);
-                        }
-                    }
-                    catch { }
-                }
-
                 if (ids.Length == 2 && int.TryParse(ids[0], out int mIdx) && int.TryParse(ids[1], out int micIdx))
                 {
                     var rawMain = workspace.RawSteps?.FirstOrDefault(s => s.StepIndex == mIdx);
-                    var rawMicro = rawMain?.MicroSteps?.ElementAtOrDefault(micIdx - 1);
 
-                    if (rawMicro != null)
+                    var cleanTrail = DeltaAnalyzer.GetCleanInteractionTrail(rawMain?.InteractionTrail);
+                    var interaction = micIdx > 0 ? cleanTrail.ElementAtOrDefault(micIdx - 1) : null;
+
+                    if (interaction != null)
                     {
-                        var bidi = rawMicro.CapturedData?.WebDriverBiDi?.ElementData;
-                        var uia = rawMicro.CapturedData?.Uia?.ElementData;
+                        var bidi = interaction.WebDriverBiDi?.ElementData;
+                        var uia = interaction.Uia?.ElementData;
 
-                        rawText = uia?.Semantic?.AccessibleName?.Value ?? bidi?.SelectorSet?.Text?.Value ?? bidi?.SelectorSet?.AriaLabel?.Value ?? bidi?.SelectorSet?.Name?.Value ?? "";
-                        role = bidi?.Semantic?.Role?.Value ?? uia?.Semantic?.Role?.Value ?? "";
+                        role = uia?.Semantic?.Role?.Value ?? interaction.TagName ?? "";
+                        bool isInput = interaction.InteractionType == "input" || interaction.InteractionType == "change" || interaction.InteractionType == "fill" || role == "textbox" || role == "editar";
+
+                        if (isInput)
+                        {
+                            rawText = uia?.Semantic?.AccessibleName?.Value
+                                      ?? bidi?.SelectorSet?.Placeholder?.Value
+                                      ?? bidi?.SelectorSet?.AriaLabel?.Value
+                                      ?? bidi?.SelectorSet?.Name?.Value
+                                      ?? interaction.ElementId
+                                      ?? "";
+                        }
+                        else
+                        {
+                            rawText = uia?.Semantic?.AccessibleName?.Value
+                                      ?? bidi?.SelectorSet?.Text?.Value
+                                      ?? bidi?.SelectorSet?.AriaLabel?.Value
+                                      ?? bidi?.SelectorSet?.Name?.Value
+                                      ?? interaction.VisibleText
+                                      ?? interaction.TagName
+                                      ?? "";
+                        }
+
+                        if (string.IsNullOrWhiteSpace(rawText) || rawText.Length < 3 || rawText.ToLower() == "input")
+                        {
+                            if (!string.IsNullOrWhiteSpace(interaction.ElementId))
+                                rawText = interaction.ElementId.Replace("-", " ").Replace("_", " ");
+                            else if (!string.IsNullOrWhiteSpace(interaction.InputType))
+                                rawText = interaction.InputType;
+                            else
+                                rawText = interaction.TagName ?? "";
+                        }
+
+                        string locLowerCheck = intent.TargetLocator?.ToLower() ?? "";
+                        if (locLowerCheck.Contains("body") || locLowerCheck.Contains("vazio") || string.IsNullOrEmpty(intent.TargetLocator))
+                        {
+                            if (!string.IsNullOrWhiteSpace(interaction.ElementId)) intent.TargetLocator = $"By.Id(\"{interaction.ElementId}\")";
+                            else if (!string.IsNullOrWhiteSpace(bidi?.SelectorSet?.XpathAbsolute?.Value)) intent.TargetLocator = $"By.XPath(\"{bidi.SelectorSet.XpathAbsolute.Value}\")";
+                            else if (!string.IsNullOrWhiteSpace(interaction.VisibleText)) { string safeText = interaction.VisibleText.Replace("\"", "\\\"").Replace("'", "\\'"); intent.TargetLocator = $"By.XPath(\"//*[normalize-space(text())='{safeText}']\")"; }
+                            else if (!string.IsNullOrWhiteSpace(interaction.Classes)) { string cleanClasses = string.Join(".", interaction.Classes.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)); intent.TargetLocator = $"By.CssSelector(\"{interaction.TagName}.{cleanClasses}\")"; }
+                            else if (!string.IsNullOrWhiteSpace(interaction.TagName)) intent.TargetLocator = $"By.TagName(\"{interaction.TagName}\")";
+                        }
                     }
                     else if (rawMain != null)
                     {
@@ -132,6 +157,13 @@ namespace LiteAutomation.Generators.CSharp
                     }
                 }
 
+                if (!string.IsNullOrWhiteSpace(rawText))
+                {
+                    rawText = Regex.Replace(rawText, @"[^a-zA-Z0-9\sÀ-ÿ]", " ").Trim();
+                    rawText = Regex.Replace(rawText, @"\s+", " ");
+                    if (rawText.Length > 40) rawText = rawText.Substring(0, 40).Trim();
+                }
+
                 string humanName = SemanticNlpEngine.GenerateHumanReadable(rawText, role);
                 string camelCaseName = SemanticNlpEngine.GenerateVariableName(rawText, role);
 
@@ -139,13 +171,15 @@ namespace LiteAutomation.Generators.CSharp
                                       humanName.StartsWith(LanguageManager.GetString("NlpPage")) ||
                                       humanName.StartsWith(LanguageManager.GetString("NlpList"));
 
-                // 🚀 FIX 2: Garante que seletores vazios de validação não se chamem "ElGenerico" mas sim "Tela"
                 string locLower = intent.TargetLocator?.ToLower() ?? "";
                 bool isGhostElement = locLower.Contains("body") || role == "document" ||
                                       string.IsNullOrEmpty(intent.TargetLocator) ||
-                                      intent.TargetLocator.Contains("VAZIO") ||
-                                      intent.TargetLocator.Contains("NÃO ENCONTRADO") ||
-                                      intent.TargetLocator.Contains("AMBÍGUO");
+                                      intent.TargetLocator.Contains("VAZIO");
+
+                if (intent.Type == IntentType.Click && !string.IsNullOrWhiteSpace(role) && role != "document" && role != "body")
+                {
+                    isGhostElement = false;
+                }
 
                 if (isGhostElement)
                 {
@@ -162,18 +196,22 @@ namespace LiteAutomation.Generators.CSharp
                 string suffix = isFemaleTarget ? LanguageManager.GetString("GrammarSuffixF") : LanguageManager.GetString("GrammarSuffixM");
 
                 string phaseContext = "";
-                if (isCanonical)
+                if (i == 0)
                 {
-                    if (i == 0 && intent.Type == IntentType.NavigateToUrl) phaseContext = kwGiven;
-                    else if (lastActionIndex != -1 && i > lastActionIndex) phaseContext = kwThen;
-                    else if (lastActionIndex == -1 && (intent.Type == IntentType.AssertVisible || intent.Type == IntentType.AssertEnabled || intent.Type == IntentType.WaitUrlChange)) phaseContext = kwThen;
-                    else phaseContext = kwWhen;
+                    phaseContext = kwGiven;
                 }
                 else
                 {
-                    if (intent.Type == IntentType.NavigateToUrl) phaseContext = kwGiven;
-                    else if (intent.Type == IntentType.WaitUrlChange || intent.Type == IntentType.AssertVisible || intent.Type == IntentType.AssertEnabled) phaseContext = kwThen;
-                    else phaseContext = kwWhen;
+                    if (isCanonical)
+                    {
+                        if (lastActionIndex != -1 && i > lastActionIndex) phaseContext = kwThen;
+                        else phaseContext = kwWhen;
+                    }
+                    else
+                    {
+                        if (intent.Type == IntentType.WaitUrlChange || intent.Type == IntentType.AssertVisible || intent.Type == IntentType.AssertEnabled) phaseContext = kwThen;
+                        else phaseContext = kwWhen;
+                    }
                 }
 
                 string gherkinKeyword = (phaseContext == lastContext) ? kwAnd : phaseContext;
@@ -194,15 +232,11 @@ namespace LiteAutomation.Generators.CSharp
                     ErrorMsg = intent.FriendlyErrorMessage,
                     StepId = intent.StepId,
                     Diagnostics = intent.Diagnostics,
-                    ActionCode = GenerateActionCode(intent, FormatLocator(intent.TargetLocator), camelCaseName)
+                    ActionCode = GenerateActionCode(intent, FormatLocator(intent.TargetLocator))
                 };
 
                 switch (intent.Type)
                 {
-                    case IntentType.NavigateToUrl:
-                        step.GherkinText = isCanonical ? LanguageManager.GetString("BddAccessSysCanon") : LanguageManager.GetString("BddAccessSysNarr");
-                        step.StepDefText = step.GherkinText;
-                        break;
                     case IntentType.Click:
                         step.GherkinText = isCanonical ? string.Format(LanguageManager.GetString("BddClickCanon"), args) : string.Format(LanguageManager.GetString("BddClickNarr"), args);
                         step.StepDefText = step.GherkinText;
@@ -216,33 +250,46 @@ namespace LiteAutomation.Generators.CSharp
                         step.StepDefText = step.GherkinText;
                         break;
                     case IntentType.InputText:
-                        varName = EnsureUniqueVar(examples, camelCaseName, intent.Value ?? "");
+                        string paramName = camelCaseName;
+                        if (paramName.StartsWith("input", StringComparison.OrdinalIgnoreCase) && paramName.Length > 5)
+                        {
+                            paramName = paramName.Substring(5);
+                            paramName = char.ToLower(paramName[0]) + paramName.Substring(1);
+                        }
+                        else if (paramName.StartsWith("campo", StringComparison.OrdinalIgnoreCase) && paramName.Length > 5)
+                        {
+                            paramName = paramName.Substring(5);
+                            paramName = char.ToLower(paramName[0]) + paramName.Substring(1);
+                        }
+
+                        varName = EnsureUniqueVar(examples, paramName, intent.Value ?? "");
                         args[2] = varName;
 
                         step.GherkinText = isCanonical ? string.Format(LanguageManager.GetString("BddInputCanon"), args) : string.Format(LanguageManager.GetString("BddInputNarr"), args);
-                        step.StepDefText = (isCanonical ? string.Format(LanguageManager.GetString("BddInputDefCanon"), args) : string.Format(LanguageManager.GetString("BddInputDefNarr"), args)) + "\"\"(.*)\"\"";
+                        step.StepDefText = (isCanonical ? string.Format(LanguageManager.GetString("BddInputDefCanon"), args) : string.Format(LanguageManager.GetString("BddInputDefNarr"), args)) + "\"(.*)\"";
                         step.MethodParams = $"string {varName}";
-                        step.ActionCode = step.ActionCode.Replace($"\"{intent.Value.Replace("\"", "\\\"")}\"", varName);
+
+                        string safeReplaceVal = intent.Value != null ? intent.Value.Replace("\"", "\\\"") : "";
+                        step.ActionCode = step.ActionCode.Replace($"SendKeys(\"{safeReplaceVal}\")", $"SendKeys({varName})");
                         break;
-                    case IntentType.WaitUrlChange:
-                        if (isCanonical) step.GherkinText = phaseContext == kwThen ? LanguageManager.GetString("BddWaitThenCanon") : LanguageManager.GetString("BddWaitWhenCanon");
-                        else step.GherkinText = LanguageManager.GetString("BddWaitNarr");
+                    case IntentType.KeyPress:
+                        step.GherkinText = $"aciono a tecla {intent.Key.ToUpper()} no {humanName}";
                         step.StepDefText = step.GherkinText;
                         break;
                     case IntentType.AssertVisible:
-                        if (isCanonical) step.GherkinText = phaseContext == kwThen ? string.Format(LanguageManager.GetString("BddAssertVisThenCanon"), args) : string.Format(LanguageManager.GetString("BddAssertVisWhenCanon"), args);
-                        else step.GherkinText = string.Format(LanguageManager.GetString("BddAssertVisNarr"), args);
-                        step.StepDefText = step.GherkinText;
-                        break;
-                    case IntentType.AssertEnabled:
-                        if (isCanonical) step.GherkinText = phaseContext == kwThen ? string.Format(LanguageManager.GetString("BddAssertEnThenCanon"), args) : string.Format(LanguageManager.GetString("BddAssertEnWhenCanon"), args);
-                        else step.GherkinText = string.Format(LanguageManager.GetString("BddAssertEnNarr"), args);
+                        step.GherkinText = isCanonical ? (phaseContext == kwThen ? string.Format(LanguageManager.GetString("BddAssertVisThenCanon"), args) : string.Format(LanguageManager.GetString("BddAssertVisWhenCanon"), args)) : string.Format(LanguageManager.GetString("BddAssertVisNarr"), args);
                         step.StepDefText = step.GherkinText;
                         break;
                     default:
                         step.GherkinText = string.Format(LanguageManager.GetString("BddDefaultIntent"), args);
                         step.StepDefText = step.GherkinText;
                         break;
+                }
+
+                if (i == 0 && intent.Type == IntentType.AssertVisible)
+                {
+                    step.GherkinText = $"estou na {humanName}";
+                    step.StepDefText = step.GherkinText;
                 }
 
                 string baseGherkin = step.GherkinText;
@@ -288,19 +335,16 @@ namespace LiteAutomation.Generators.CSharp
                 {
                     IntentType.NavigateToUrl => LanguageManager.GetString("MethodAccess"),
                     IntentType.Click => LanguageManager.GetString("MethodClick"),
-                    IntentType.Hover => LanguageManager.GetString("MethodHover"),
-                    IntentType.Blur => LanguageManager.GetString("MethodBlur"),
+                    IntentType.KeyPress => "AcionarTecla",
                     IntentType.InputText => LanguageManager.GetString("MethodFill"),
                     IntentType.WaitUrlChange => LanguageManager.GetString("MethodWait"),
                     IntentType.AssertVisible => LanguageManager.GetString("MethodVerifyVis"),
-                    IntentType.AssertEnabled => LanguageManager.GetString("MethodVerifyEn"),
                     _ => "Executar"
                 };
 
                 string targetSuffix = intent.Type switch
                 {
                     IntentType.NavigateToUrl => "Sistema",
-                    IntentType.Blur => "Menus",
                     IntentType.WaitUrlChange => "Pagina",
                     _ => Capitalize(camelCaseName)
                 };
@@ -340,8 +384,38 @@ namespace LiteAutomation.Generators.CSharp
             sb.AppendLine($"        private IWebDriver driver;");
             sb.AppendLine($"        private WebDriverWait wait;");
             sb.AppendLine();
-            sb.AppendLine($"        [BeforeScenario]\n        public void Setup()\n        {{\n            var options = new ChromeOptions();\n            options.AddArgument(\"--disable-blink-features=AutomationControlled\");\n            driver = new ChromeDriver(options);\n            driver.Manage().Window.Maximize();\n            wait = new WebDriverWait(driver, TimeSpan.FromSeconds(10));\n        }}\n");
-            sb.AppendLine($"        [AfterScenario]\n        public void Teardown()\n        {{\n            driver?.Dispose();\n        }}\n");
+
+            // 🚀 SEU SETUP ANTI-BOT E PRIMEIRA NAVEGAÇÃO
+            sb.AppendLine("        [BeforeScenario]");
+            sb.AppendLine("        public void Setup()");
+            sb.AppendLine("        {");
+            sb.AppendLine("            var options = new ChromeOptions();");
+            sb.AppendLine("            options.AddExcludedArgument(\"enable-automation\");");
+            sb.AppendLine("            options.AddAdditionalOption(\"useAutomationExtension\", false);");
+            sb.AppendLine("            options.AddUserProfilePreference(\"credentials_enable_service\", false);");
+            sb.AppendLine("            options.AddUserProfilePreference(\"profile.password_manager_enabled\", false);");
+            sb.AppendLine("            options.AddArgument(\"--disable-blink-features=AutomationControlled\");");
+            sb.AppendLine("            options.AddArgument(\"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36\");");
+            sb.AppendLine("");
+            sb.AppendLine("            driver = new ChromeDriver(options);");
+            sb.AppendLine("            driver.Manage().Window.Maximize();");
+            sb.AppendLine("            wait = new WebDriverWait(driver, TimeSpan.FromSeconds(10));");
+
+            var firstStepWithUrl = workspace.RawSteps?.FirstOrDefault(s => s.ObservedContext != null && !string.IsNullOrEmpty(s.ObservedContext.Url));
+            if (firstStepWithUrl != null)
+            {
+                sb.AppendLine($"\n            driver.Navigate().GoToUrl(\"{firstStepWithUrl.ObservedContext.Url}\");");
+            }
+
+            sb.AppendLine("        }\n");
+
+            // 🚀 SEU TEARDOWN ATUALIZADO
+            sb.AppendLine("        [AfterScenario]");
+            sb.AppendLine("        public void Teardown()");
+            sb.AppendLine("        {");
+            sb.AppendLine("            driver?.Dispose();");
+            sb.AppendLine("            driver = null;");
+            sb.AppendLine("        }\n");
 
             var uniqueStepDefs = new HashSet<string>();
 
@@ -402,36 +476,31 @@ namespace LiteAutomation.Generators.CSharp
             return varName;
         }
 
-        private string GenerateActionCode(AutomationIntent intent, string loc, string varName)
+        private string GenerateActionCode(AutomationIntent intent, string loc)
         {
             switch (intent.Type)
             {
-                case IntentType.NavigateToUrl: return $"driver.Navigate().GoToUrl(\"{intent.Value}\");";
-                case IntentType.WaitUrlChange: return $"wait.Until(d => d.Url.Contains(\"{intent.Value}\"));";
-                case IntentType.Click: return $"var {varName} = wait.Until(d => d.FindElement({loc}));\n((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].scrollIntoView({{block: 'center'}});\", {varName});\ntry\n{{\n    {varName}.Click();\n}}\ncatch\n{{\n    ((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].click();\", {varName});\n}}";
-                case IntentType.Hover: return $"var {varName} = wait.Until(d => d.FindElement({loc}));\nnew OpenQA.Selenium.Interactions.Actions(driver).MoveToElement({varName}).Perform();";
-                case IntentType.Blur: return $"driver.FindElement(By.TagName(\"body\")).Click();";
-                case IntentType.InputText: return $"var {varName} = wait.Until(d => d.FindElement({loc}));\n{varName}.Clear();\n{varName}.SendKeys(\"{intent.Value.Replace("\"", "\\\"")}\");";
-                case IntentType.KeyPress: return $"wait.Until(d => d.FindElement({loc})).SendKeys({MapKey(intent.Key)});";
-                case IntentType.ScrollTo: return $"var {varName} = wait.Until(d => d.FindElement({loc}));\n((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].scrollIntoView({{block: 'center'}});\", {varName});";
+                case IntentType.Click: return $"var el = wait.Until(d => d.FindElement({loc}));\n((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].scrollIntoView({{block: 'center'}});\", el);\ntry\n{{\n    el.Click();\n}}\ncatch\n{{\n    ((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].click();\", el);\n}}";
+                case IntentType.InputText: string safeInput = intent.Value != null ? intent.Value.Replace("\"", "\\\"") : ""; return $"var el = wait.Until(d => d.FindElement({loc}));\nel.Clear();\nel.SendKeys(\"{safeInput}\");";
+                case IntentType.KeyPress: return $"var el = wait.Until(d => d.FindElement({loc}));\nel.SendKeys({MapKey(intent.Key)});\nSystem.Threading.Thread.Sleep(500);";
                 case IntentType.AssertVisible: return $"Assert.IsTrue(wait.Until(d => d.FindElement({loc})).Displayed);";
-                case IntentType.AssertEnabled: return $"wait.Until(d => d.FindElement({loc}).Enabled);";
                 default: return "";
             }
         }
 
         private string FormatLocator(string loc)
         {
-            // 🚀 FIX 3: Transforma qualquer string vazia ou corrompida no Body com segurança
-            if (string.IsNullOrEmpty(loc) || loc.Contains("VAZIO") || loc.Contains("NÃO ENCONTRADO") || loc.Contains("AMBÍGUO"))
-                return "By.TagName(\"body\")";
+            if (string.IsNullOrEmpty(loc) || loc.Contains("VAZIO") || loc.Contains("NÃO ENCONTRADO") || loc.Contains("AMBÍGUO")) return "By.TagName(\"body\")";
             if (loc.StartsWith("By.") || loc.StartsWith("Page.")) return loc;
-            if (loc.StartsWith("/") || loc.StartsWith("(")) return $"By.XPath(\"{loc}\")";
+            if (loc.StartsWith("xpath=") || loc.StartsWith("/") || loc.StartsWith("(")) return $"By.XPath(\"{loc.Replace("xpath=", "")}\")";
+            if (loc.StartsWith("css=")) return $"By.CssSelector(\"{loc.Replace("css=", "")}\")";
             return $"By.CssSelector(\"{loc}\")";
         }
 
-        private string MapKey(string key) => key.ToLower() switch { "enter" => "Keys.Enter", "tab" => "Keys.Tab", "escape" => "Keys.Escape", "space" => "Keys.Space", _ => $"\"{key}\"" };
+        private string MapKey(string key) => key?.ToLower().Replace("keypress_", "") switch { "enter" => "Keys.Enter", "tab" => "Keys.Tab", "escape" => "Keys.Escape", "space" => "Keys.Space", _ => $"\"{key}\"" };
+
         private string Capitalize(string text) { if (string.IsNullOrEmpty(text)) return text; return char.ToUpper(text[0]) + text.Substring(1); }
+
         private string RemoveAccents(string text)
         {
             var normalizedString = text.Normalize(NormalizationForm.FormD);

@@ -11,7 +11,6 @@ namespace LiteAutomation.Generators.Reports
 {
     public class A11yReportGenerator : ICodeGenerator
     {
-        // Classe auxiliar para transportar o resultado da auditoria de cada elemento
         private class ElementAuditResult
         {
             public bool IsCritical { get; set; }
@@ -28,10 +27,8 @@ namespace LiteAutomation.Generators.Reports
         {
             var sb = new StringBuilder();
 
-            // Métricas Globais (Interações vs Tela Inteira)
             int globalInteracted = 0;
             int globalVisibleScanned = 0;
-
             int criticalInteractions = 0;
             int warningInteractions = 0;
             int healthyInteractions = 0;
@@ -43,27 +40,31 @@ namespace LiteAutomation.Generators.Reports
             {
                 if (mainStep.IsEvidenceOnly) continue;
 
-                string displayStep = mainStep.StepIndex.ToString();
+                int stepIdx = mainStep.StepIndex ?? 0;
                 string stepName = string.IsNullOrWhiteSpace(mainStep.StepName) ? $"Ação da Tela" : mainStep.StepName;
 
-                reportBody.AppendLine($"## 📍 Passo {displayStep}: {stepName}");
+                reportBody.AppendLine($"## 📍 Passo {stepIdx}: {stepName}");
                 reportBody.AppendLine();
 
-                // =================================================================
-                // 1. RAIO-X DA TELA INTEIRA (FAT PAYLOAD - OBSERVED CONTEXT)
-                // =================================================================
                 if (mainStep.ObservedContext?.VisibleElements != null && mainStep.ObservedContext.VisibleElements.Count > 0)
                 {
                     var visibleResults = new List<ElementAuditResult>();
 
-                    foreach (var element in mainStep.ObservedContext.VisibleElements)
+                    void ScanTree(List<VisibleElementDto> nodes)
                     {
-                        if (element.CapturedData != null)
+                        foreach (var node in nodes)
                         {
-                            visibleResults.Add(EvaluateElement(element.CapturedData));
-                            globalVisibleScanned++;
+                            if (node.CapturedData != null)
+                            {
+                                visibleResults.Add(EvaluateElement(node.CapturedData));
+                                globalVisibleScanned++;
+                            }
+                            if (node.Children != null && node.Children.Count > 0)
+                                ScanTree(node.Children);
                         }
                     }
+
+                    ScanTree(mainStep.ObservedContext.VisibleElements);
 
                     int totalVisible = visibleResults.Count;
                     int screenCritical = visibleResults.Count(r => r.IsCritical);
@@ -71,10 +72,9 @@ namespace LiteAutomation.Generators.Reports
                     int screenHealthy = visibleResults.Count(r => r.IsHealthy);
 
                     reportBody.AppendLine($"### 🌐 Contexto da Tela (Background Scan)");
-                    reportBody.AppendLine($"- **Elementos varridos na tela:** `{totalVisible}`");
+                    reportBody.AppendLine($"- **Elementos varridos na árvore DOM:** `{totalVisible}`");
                     reportBody.AppendLine($"- 🟢 Saudáveis: `{screenHealthy}` | 🟡 Alertas: `{screenWarnings}` | 🔴 Críticos (Sem A11Y): `{screenCritical}`");
 
-                    // Mostra apenas os piores ofensores para não poluir o relatório
                     if (screenCritical > 0)
                     {
                         reportBody.AppendLine();
@@ -89,26 +89,36 @@ namespace LiteAutomation.Generators.Reports
                     reportBody.AppendLine();
                 }
 
-                // =================================================================
-                // 2. AUDITORIA DAS INTERAÇÕES DIRETAS (MICRO-STEPS)
-                // =================================================================
-                if (mainStep.MicroSteps != null && mainStep.MicroSteps.Count > 0)
+                var cleanTrail = DeltaAnalyzer.GetCleanInteractionTrail(mainStep.InteractionTrail);
+
+                if (cleanTrail != null && cleanTrail.Count > 0)
                 {
                     reportBody.AppendLine($"### 🖱️ Interações Diretas no Fluxo");
-                    int microIndex = 1;
+                    int interactionIndex = 1;
 
-                    foreach (var micro in mainStep.MicroSteps)
+                    foreach (var interaction in cleanTrail)
                     {
                         globalInteracted++;
-                        string microStepId = micro.StepId ?? $"{mainStep.StepIndex}.{microIndex}";
+                        string displayStep = $"{stepIdx}.{interactionIndex}";
 
-                        var audit = EvaluateElement(micro.CapturedData);
+                        // 🚀 COMPATIBILIDADE ESTRUTURAL MANTIDA!
+                        CapturedDataDto interactionData = null;
+                        if (interaction.WebDriverBiDi != null || interaction.Uia != null || interaction.AxTree != null)
+                        {
+                            interactionData = new CapturedDataDto
+                            {
+                                WebDriverBiDi = interaction.WebDriverBiDi,
+                                Uia = interaction.Uia,
+                                AxTree = interaction.AxTree
+                            };
+                        }
+                        var audit = EvaluateElement(interactionData);
 
                         if (audit.IsCritical) criticalInteractions++;
                         else if (audit.IsWarning) warningInteractions++;
                         else healthyInteractions++;
 
-                        reportBody.AppendLine($"#### Ação [{microStepId}]: `{micro.ActionType}`");
+                        reportBody.AppendLine($"#### Ação [{displayStep}]: `{interaction.InteractionType}`");
                         reportBody.AppendLine($"**Status:** {audit.StatusLabel}");
                         reportBody.AppendLine($"**Melhor Seletor:** `{audit.BestLocator}`");
 
@@ -122,7 +132,7 @@ namespace LiteAutomation.Generators.Reports
                         reportBody.AppendLine(audit.DiagnosticsDetails);
                         reportBody.AppendLine("---");
 
-                        microIndex++;
+                        interactionIndex++;
                     }
                 }
                 else
@@ -134,19 +144,15 @@ namespace LiteAutomation.Generators.Reports
 
             int healthScore = globalInteracted == 0 ? 100 : (int)(((double)healthyInteractions / globalInteracted) * 100);
 
-            // =================================================================
-            // RENDERIZAÇÃO DO CABEÇALHO DO RELATÓRIO
-            // =================================================================
             sb.AppendLine($"# 📊 Relatório de Auditoria de Acessibilidade e Resiliência DOM");
-            sb.AppendLine($"> **Gerado pelo Motor:** LiteAutomation (Fat Payload Engine)");
+            sb.AppendLine($"> **Gerado pelo Motor:** LiteAutomation (State-Driven Engine)");
             sb.AppendLine($"> **Data da Análise:** {DateTime.Now.ToString("dd/MM/yyyy HH:mm")}");
             sb.AppendLine();
-
             sb.AppendLine($"## 🩸 Hemograma do Front-End (Resumo Executivo)");
-            sb.AppendLine($"O LiteAutomation auditou ativamente a jornada do utilizador e mapeou em background todos os elementos em volta.");
+            sb.AppendLine($"O LiteAutomation auditou ativamente a jornada do utilizador e mapeou em background a árvore de elementos em volta.");
             sb.AppendLine();
-            sb.AppendLine($"- **Total de Elementos de Background Escaneados:** `{globalVisibleScanned}`");
-            sb.AppendLine($"- **Total de Interações Críticas da Automação:** `{globalInteracted}`");
+            sb.AppendLine($"- **Total de Nós DOM Escaneados (Background):** `{globalVisibleScanned}`");
+            sb.AppendLine($"- **Total de Interações Físicas da Automação:** `{globalInteracted}`");
             sb.AppendLine($"- **Índice de Saúde do Fluxo de Automação:** `{healthScore}%`");
             sb.AppendLine();
             sb.AppendLine($"### Distribuição das Interações do Robô:");
@@ -165,17 +171,14 @@ namespace LiteAutomation.Generators.Reports
             return sb.ToString();
         }
 
-        // =====================================================================
-        // MOTOR CENTRAL DE AVALIAÇÃO DE RESILIÊNCIA E A11Y
-        // =====================================================================
         private ElementAuditResult EvaluateElement(CapturedDataDto? capturedData)
         {
             var result = new ElementAuditResult();
             if (capturedData == null)
             {
                 result.IsCritical = true;
-                result.StatusLabel = "🔴 Crítico (Dados de Captura Inexistentes)";
-                result.DiagnosticsDetails = "- 🚨 Falha extrema: Nenhum dado de elemento foi capturado pela ferramenta.";
+                result.StatusLabel = "🔴 Crítico (Dados Não Capturados / Somente Evento)";
+                result.DiagnosticsDetails = "- 🚨 Elemento Ghost: O robô interagiu em algo que não gerou dados estruturais (ex: canvas, svg não mapeado).";
                 return result;
             }
 

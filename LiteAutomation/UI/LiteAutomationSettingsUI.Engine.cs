@@ -52,13 +52,49 @@ namespace LiteAutomation.UI
             {
                 foreach (var main in _workspace.RawSteps)
                 {
-                    // 🚀 SE FOR UM PASSO NORMAL DE AÇÃO
-                    if (main.MicroSteps != null && main.MicroSteps.Count > 0 && !main.IsEvidenceOnly)
+                    if (!main.IsActive || main.PendingConfirmation)
+                        continue;
+
+                    int stepIdx = main.StepIndex ?? 0;
+
+                    // 1. A ÂNCORA DO PRINT (X.0)
+                    string displayStep0 = $"{stepIdx}.0";
+                    string cacheKey0 = $"{framework}_{displayStep0}";
+
+                    List<LocatorOption> baseOptions0;
+                    if (!_locatorCache.TryGetValue(cacheKey0, out baseOptions0))
                     {
-                        int microIndex = 1;
-                        foreach (var micro in main.MicroSteps)
+                        baseOptions0 = new List<LocatorOption>();
+                        string codeSnippet = isPlaywright ? "Page.Locator(\"body\")" : "By.TagName(\"body\")";
+                        baseOptions0.Add(new LocatorOption { Category = LanguageManager.GetString("CatSemantic"), Name = LanguageManager.GetString("SdetValidationBody"), CodeSnippet = codeSnippet, Confidence = 100, IsSemantic = true });
+                        _locatorCache[cacheKey0] = baseOptions0;
+                    }
+
+                    var displayOptions0 = baseOptions0.Select(o => o.Clone()).ToList();
+                    foreach (var opt in displayOptions0) opt.DisplayName = $"{LanguageManager.GetString("PrefixSemantic")} ➔ [{opt.Confidence}] {opt.Name}";
+
+                    int rowIndex0 = gridLocators.Rows.Add();
+                    var row0 = gridLocators.Rows[rowIndex0];
+                    row0.Cells[0].Value = displayStep0;
+                    row0.Cells[1].Value = LanguageManager.GetString("SdetEvidence");
+
+                    var comboCell0 = (DataGridViewComboBoxCell)row0.Cells[2];
+                    comboCell0.DataSource = displayOptions0;
+                    comboCell0.DisplayMember = "DisplayName";
+                    comboCell0.ValueMember = "CodeSnippet";
+                    comboCell0.Value = displayOptions0[0].CodeSnippet;
+
+                    _currentConfig.LocatorOverrides[displayStep0] = displayOptions0[0].CodeSnippet;
+
+                    // 2. AS INTERAÇÕES
+                    var cleanTrail = DeltaAnalyzer.GetCleanInteractionTrail(main.InteractionTrail);
+
+                    if (!main.IsEvidenceOnly && cleanTrail.Count > 0)
+                    {
+                        int interactionIndex = 1;
+                        foreach (var interaction in cleanTrail)
                         {
-                            string displayStep = micro.StepId ?? $"{main.StepIndex}.{microIndex}";
+                            string displayStep = $"{stepIdx}.{interactionIndex}";
                             string cacheKey = $"{framework}_{displayStep}";
 
                             List<LocatorOption> baseOptions;
@@ -66,8 +102,10 @@ namespace LiteAutomation.UI
                             if (!_locatorCache.TryGetValue(cacheKey, out baseOptions))
                             {
                                 baseOptions = new List<LocatorOption>();
-                                var uia = micro.CapturedData?.Uia?.ElementData;
-                                var bidi = micro.CapturedData?.WebDriverBiDi?.ElementData;
+
+                                // 🚀 O(1): ACESSO DIRETO SEM BUSCA NA ÁRVORE!
+                                var uia = interaction.Uia?.ElementData;
+                                var bidi = interaction.WebDriverBiDi?.ElementData;
 
                                 if (uia != null && !string.IsNullOrWhiteSpace(uia.Semantic?.AccessibleName?.Value))
                                 {
@@ -108,6 +146,31 @@ namespace LiteAutomation.UI
                                     AddOptionIfValid(baseOptions, bidi.SelectorSet.AriaLabel, "Aria-Label", isPlaywright, "Page.Locator(\"css={0}\")", "By.CssSelector(\"{0}\")", true, LanguageManager.GetString("CatSemantic"));
                                 }
 
+                                if (baseOptions.Count == 0 || !baseOptions.Any(o => o.Confidence >= 80))
+                                {
+                                    if (!string.IsNullOrWhiteSpace(interaction.ElementId))
+                                        baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatDom"), Name = "ID Nativo do Evento", CodeSnippet = isPlaywright ? $"Page.Locator(\"#{interaction.ElementId}\")" : $"By.Id(\"{interaction.ElementId}\")", Confidence = 85, IsSemantic = false });
+
+                                    if (!string.IsNullOrWhiteSpace(interaction.VisibleText))
+                                    {
+                                        string safeText = interaction.VisibleText.Replace("\"", "\\\"").Replace("'", "\\'");
+                                        baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatSemantic"), Name = "Texto Nativo do Evento", CodeSnippet = isPlaywright ? $"Page.Locator(\"text={safeText}\")" : $"By.XPath(\"//*[normalize-space(text())='{safeText}']\")", Confidence = 80, IsSemantic = true });
+                                    }
+
+                                    if (!string.IsNullOrWhiteSpace(interaction.Classes))
+                                    {
+                                        string cleanClasses = string.Join(".", interaction.Classes.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries));
+                                        baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatDom"), Name = "CSS Class do Evento", CodeSnippet = isPlaywright ? $"Page.Locator(\"{interaction.TagName}.{cleanClasses}\")" : $"By.CssSelector(\"{interaction.TagName}.{cleanClasses}\")", Confidence = 65, IsSemantic = false });
+                                    }
+
+                                    string bidiXpath = bidi?.SelectorSet?.XpathAbsolute?.Value;
+                                    if (!string.IsNullOrWhiteSpace(bidiXpath))
+                                        baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatDom"), Name = $"XPath Absolute BiDi", CodeSnippet = isPlaywright ? $"Page.Locator(\"xpath={bidiXpath}\")" : $"By.XPath(\"{bidiXpath}\")", Confidence = 50, IsSemantic = false });
+
+                                    if (!string.IsNullOrWhiteSpace(interaction.TagName) && baseOptions.Count == 0)
+                                        baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatDom"), Name = $"Tag Nativa ({interaction.TagName})", CodeSnippet = isPlaywright ? $"Page.Locator(\"{interaction.TagName}\")" : $"By.TagName(\"{interaction.TagName}\")", Confidence = 10, IsSemantic = false });
+                                }
+
                                 if (baseOptions.Count == 0)
                                     baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatDom"), Name = LanguageManager.GetString("SdetUnavailable"), CodeSnippet = isPlaywright ? "Page.Locator(\"/* VAZIO */\")" : "By.XPath(\"/* VAZIO */\")", Confidence = 0, IsSemantic = false });
 
@@ -115,17 +178,14 @@ namespace LiteAutomation.UI
                                 _locatorCache[cacheKey] = baseOptions;
                             }
 
-                            var displayOptions = baseOptions.Select(o => o.Clone()).ToList();
-                            foreach (var opt in displayOptions)
-                                opt.DisplayName = $"{(opt.Category == LanguageManager.GetString("CatSemantic") ? LanguageManager.GetString("PrefixSemantic") : LanguageManager.GetString("PrefixDom"))} ➔ [{opt.Confidence}] {opt.Name}";
-
-                            displayOptions = displayOptions.OrderByDescending(o => o.Confidence).ThenByDescending(o => o.IsSemantic).ToList();
+                            var displayOptions = baseOptions.Select(o => o.Clone()).OrderByDescending(o => o.Confidence).ThenByDescending(o => o.IsSemantic).ToList();
+                            foreach (var opt in displayOptions) opt.DisplayName = $"{(opt.Category == LanguageManager.GetString("CatSemantic") ? LanguageManager.GetString("PrefixSemantic") : LanguageManager.GetString("PrefixDom"))} ➔ [{opt.Confidence}] {opt.Name}";
 
                             int rowIndex = gridLocators.Rows.Add();
                             var row = gridLocators.Rows[rowIndex];
 
                             row.Cells[0].Value = displayStep;
-                            row.Cells[1].Value = micro.ActionType?.Replace("keypress_", LanguageManager.GetString("SdetKey")) ?? "click";
+                            row.Cells[1].Value = interaction.InteractionType?.Replace("keypress_", LanguageManager.GetString("SdetKey")) ?? "click";
 
                             var comboCell = (DataGridViewComboBoxCell)row.Cells[2];
                             comboCell.DataSource = displayOptions;
@@ -134,40 +194,8 @@ namespace LiteAutomation.UI
                             comboCell.Value = displayOptions[0].CodeSnippet;
 
                             _currentConfig.LocatorOverrides[displayStep] = displayOptions[0].CodeSnippet;
-                            microIndex++;
+                            interactionIndex++;
                         }
-                    }
-                    else
-                    {
-                        // 🚀 SE FOR UM PASSO DE EVIDÊNCIA (O "ENTÃO" DO BDD)
-                        string displayStep = $"{main.StepIndex}.1";
-                        string cacheKey = $"{framework}_{displayStep}";
-
-                        List<LocatorOption> baseOptions;
-                        if (!_locatorCache.TryGetValue(cacheKey, out baseOptions))
-                        {
-                            baseOptions = new List<LocatorOption>();
-                            string codeSnippet = isPlaywright ? "Page.Locator(\"body\")" : "By.TagName(\"body\")";
-                            baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatSemantic"), Name = LanguageManager.GetString("SdetValidationBody"), CodeSnippet = codeSnippet, Confidence = 100, IsSemantic = true });
-                            _locatorCache[cacheKey] = baseOptions;
-                        }
-
-                        var displayOptions = baseOptions.Select(o => o.Clone()).ToList();
-                        foreach (var opt in displayOptions) opt.DisplayName = $"{LanguageManager.GetString("PrefixSemantic")} ➔ [{opt.Confidence}] {opt.Name}";
-
-                        int rowIndex = gridLocators.Rows.Add();
-                        var row = gridLocators.Rows[rowIndex];
-
-                        row.Cells[0].Value = displayStep;
-                        row.Cells[1].Value = LanguageManager.GetString("SdetEvidence");
-
-                        var comboCell = (DataGridViewComboBoxCell)row.Cells[2];
-                        comboCell.DataSource = displayOptions;
-                        comboCell.DisplayMember = "DisplayName";
-                        comboCell.ValueMember = "CodeSnippet";
-                        comboCell.Value = displayOptions[0].CodeSnippet;
-
-                        _currentConfig.LocatorOverrides[displayStep] = displayOptions[0].CodeSnippet;
                     }
                 }
             }

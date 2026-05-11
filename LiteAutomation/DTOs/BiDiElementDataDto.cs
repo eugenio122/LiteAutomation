@@ -2,11 +2,11 @@
 
 namespace LiteAutomation.DTOs
 {
-    public class ElementDataDto
+    public class BiDiElementDataDto
     {
-        [JsonPropertyName("semantic")] public SemanticDto? Semantic { get; set; }
         [JsonPropertyName("selectorSet")] public SelectorSetDto? SelectorSet { get; set; }
         [JsonPropertyName("url")] public string? Url { get; set; }
         [JsonPropertyName("value")] public string? Value { get; set; }
+        [JsonPropertyName("frameworkId")] public string? FrameworkId { get; set; }
     }
 }

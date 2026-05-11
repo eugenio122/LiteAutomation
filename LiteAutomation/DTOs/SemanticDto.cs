@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace LiteAutomation.DTOs
 {
@@ -12,5 +9,4 @@ namespace LiteAutomation.DTOs
         [JsonPropertyName("role")] public LocatorData? Role { get; set; }
         [JsonPropertyName("helpText")] public LocatorData? HelpText { get; set; }
     }
-
 }

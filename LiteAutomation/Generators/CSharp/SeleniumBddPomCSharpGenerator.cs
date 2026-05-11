@@ -14,53 +14,20 @@ namespace LiteAutomation.Generators.CSharp
 {
     public class SeleniumBddPomCSharpGenerator : ICodeGenerator
     {
-        private class PageDef
-        {
-            public string PageName { get; set; }
-            public string ClassName => $"{PageName}Page";
-            public string ActionClassName => $"{PageName}Actions";
-            public Dictionary<string, LocatorDef> Locators { get; set; } = new Dictionary<string, LocatorDef>();
-            public List<ActionDef> Actions { get; set; } = new List<ActionDef>();
-        }
-
-        private class LocatorDef
-        {
-            public string RawLocator { get; set; }
-            public string StepId { get; set; }
-        }
-
-        private class ActionDef
-        {
-            public string MethodName { get; set; }
-            public string MethodParams { get; set; }
-            public string CodeBody { get; set; }
-            public string ErrorMsg { get; set; }
-            public string StepId { get; set; }
-            public string Diagnostics { get; set; }
-        }
-
-        private class StepDef
-        {
-            public string Keyword { get; set; }
-            public string GherkinText { get; set; }
-            public string StepDefAttribute { get; set; }
-            public string StepDefText { get; set; }
-            public string MethodName { get; set; }
-            public string MethodParams { get; set; }
-            public string ActionCallCode { get; set; }
-            public string Diagnostics { get; set; }
-            public string StepId { get; set; }
-        }
+        private class PageDef { public string PageName { get; set; } public string ClassName => $"{PageName}Page"; public string ActionClassName => $"{PageName}Actions"; public Dictionary<string, LocatorDef> Locators { get; set; } = new Dictionary<string, LocatorDef>(); public List<ActionDef> Actions { get; set; } = new List<ActionDef>(); }
+        private class LocatorDef { public string RawLocator { get; set; } public string StepId { get; set; } }
+        private class ActionDef { public string MethodName { get; set; } public string MethodParams { get; set; } public string CodeBody { get; set; } public string ErrorMsg { get; set; } public string StepId { get; set; } public string Diagnostics { get; set; } }
+        private class StepDef { public string Keyword { get; set; } public string GherkinText { get; set; } public string StepDefAttribute { get; set; } public string StepDefText { get; set; } public string MethodName { get; set; } public string MethodParams { get; set; } public string ActionCallCode { get; set; } public string Diagnostics { get; set; } public string StepId { get; set; } }
 
         public string GenerateCode(WorkspaceState workspace, GeneratorConfig config, string testClassName = "GeneratedTest")
         {
             var sb = new StringBuilder();
             var examples = new Dictionary<string, string>();
 
-            // 🚀 FIX 1: Chama o DeltaAnalyzer em tempo real para captar os seletores do Painel SDET na hora!
             var analyzer = new DeltaAnalyzer();
+
             var validIntents = analyzer.Analyze(workspace.RawSteps, config)
-                                       .Where(i => !i.IsNewStepHeader && i.Type != IntentType.Unknown)
+                                       .Where(i => i.Type != IntentType.Unknown)
                                        .ToList();
 
             int lastActionIndex = validIntents.FindLastIndex(i =>
@@ -86,11 +53,9 @@ namespace LiteAutomation.Generators.CSharp
             for (int i = 0; i < validIntents.Count; i++)
             {
                 var intent = validIntents[i];
-                string rawText = "";
-                string role = "";
+                string rawText = ""; string role = "";
                 var ids = intent.StepId.Split('.');
 
-                // 1. DESCOBERTA DE PÁGINA
                 if (ids.Length == 2 && int.TryParse(ids[0], out int mIdxForName))
                 {
                     var rawMain = workspace.RawSteps?.FirstOrDefault(s => s.StepIndex == mIdxForName);
@@ -99,54 +64,74 @@ namespace LiteAutomation.Generators.CSharp
                         string pTitle = rawMain.ObservedContext.PageTitle;
                         if (pTitle.Contains("-")) pTitle = pTitle.Split('-')[0];
                         if (pTitle.Contains("|")) pTitle = pTitle.Split('|')[0];
-
                         string rawPageVar = SemanticNlpEngine.GenerateVariableName(pTitle.Trim(), "");
                         if (rawPageVar.StartsWith("el")) rawPageVar = rawPageVar.Substring(2);
                         currentPageName = Capitalize(rawPageVar);
                     }
                 }
 
-                if (intent.Type == IntentType.NavigateToUrl || intent.Type == IntentType.WaitUrlChange)
-                {
-                    try
-                    {
-                        var uri = new Uri(intent.Value.StartsWith("http") ? intent.Value : "http://dummy" + intent.Value);
-                        string seg = uri.Segments.LastOrDefault()?.Replace("/", "").Split('?')[0];
-                        if (!string.IsNullOrEmpty(seg) && seg != "index.html")
-                        {
-                            string rawPageVar = SemanticNlpEngine.GenerateVariableName(seg, "");
-                            if (rawPageVar.StartsWith("el")) rawPageVar = rawPageVar.Substring(2);
-                            currentPageName = Capitalize(rawPageVar);
-                        }
-                    }
-                    catch { }
-                }
-
-                // Cria ou recupera a Page atual
                 string safePageKey = string.IsNullOrWhiteSpace(currentPageName) ? "Generica" : Capitalize(RemoveAccents(currentPageName).Replace(" ", ""));
-                if (!pageDictionary.ContainsKey(safePageKey))
-                {
-                    pageDictionary[safePageKey] = new PageDef { PageName = safePageKey };
-                }
+                if (!pageDictionary.ContainsKey(safePageKey)) pageDictionary[safePageKey] = new PageDef { PageName = safePageKey };
                 var activePage = pageDictionary[safePageKey];
 
-                // 2. EXTRAÇÃO DE TEXTO DO ELEMENTO
                 if (ids.Length == 2 && int.TryParse(ids[0], out int mIdx) && int.TryParse(ids[1], out int micIdx))
                 {
                     var rawMain = workspace.RawSteps?.FirstOrDefault(s => s.StepIndex == mIdx);
-                    var rawMicro = rawMain?.MicroSteps?.ElementAtOrDefault(micIdx - 1);
 
-                    if (rawMicro != null)
+                    var cleanTrail = DeltaAnalyzer.GetCleanInteractionTrail(rawMain?.InteractionTrail);
+                    var interaction = micIdx > 0 ? cleanTrail.ElementAtOrDefault(micIdx - 1) : null;
+
+                    if (interaction != null)
                     {
-                        var bidi = rawMicro.CapturedData?.WebDriverBiDi?.ElementData;
-                        var uia = rawMicro.CapturedData?.Uia?.ElementData;
-                        rawText = uia?.Semantic?.AccessibleName?.Value ?? bidi?.SelectorSet?.Text?.Value ?? bidi?.SelectorSet?.AriaLabel?.Value ?? bidi?.SelectorSet?.Name?.Value ?? "";
-                        role = bidi?.Semantic?.Role?.Value ?? uia?.Semantic?.Role?.Value ?? "";
+                        var bidi = interaction.WebDriverBiDi?.ElementData;
+                        var uia = interaction.Uia?.ElementData;
+
+                        role = uia?.Semantic?.Role?.Value ?? interaction.TagName ?? "";
+                        bool isInput = interaction.InteractionType == "input" || interaction.InteractionType == "change" || interaction.InteractionType == "fill" || role == "textbox" || role == "editar";
+
+                        if (isInput)
+                        {
+                            rawText = uia?.Semantic?.AccessibleName?.Value
+                                      ?? bidi?.SelectorSet?.Placeholder?.Value
+                                      ?? bidi?.SelectorSet?.AriaLabel?.Value
+                                      ?? bidi?.SelectorSet?.Name?.Value
+                                      ?? interaction.ElementId
+                                      ?? "";
+                        }
+                        else
+                        {
+                            rawText = uia?.Semantic?.AccessibleName?.Value
+                                      ?? bidi?.SelectorSet?.Text?.Value
+                                      ?? bidi?.SelectorSet?.AriaLabel?.Value
+                                      ?? bidi?.SelectorSet?.Name?.Value
+                                      ?? interaction.VisibleText
+                                      ?? interaction.TagName
+                                      ?? "";
+                        }
+
+                        if (string.IsNullOrWhiteSpace(rawText) || rawText.Length < 3 || rawText.ToLower() == "input")
+                        {
+                            if (!string.IsNullOrWhiteSpace(interaction.ElementId))
+                                rawText = interaction.ElementId.Replace("-", " ").Replace("_", " ");
+                            else if (!string.IsNullOrWhiteSpace(interaction.InputType))
+                                rawText = interaction.InputType;
+                            else
+                                rawText = interaction.TagName ?? "";
+                        }
+
+                        string locLowerCheck = intent.TargetLocator?.ToLower() ?? "";
+                        if (locLowerCheck.Contains("body") || locLowerCheck.Contains("vazio") || string.IsNullOrEmpty(intent.TargetLocator))
+                        {
+                            if (!string.IsNullOrWhiteSpace(interaction.ElementId)) intent.TargetLocator = $"By.Id(\"{interaction.ElementId}\")";
+                            else if (!string.IsNullOrWhiteSpace(bidi?.SelectorSet?.XpathAbsolute?.Value)) intent.TargetLocator = $"By.XPath(\"{bidi.SelectorSet.XpathAbsolute.Value}\")";
+                            else if (!string.IsNullOrWhiteSpace(interaction.VisibleText)) { string safeText = interaction.VisibleText.Replace("\"", "\\\"").Replace("'", "\\'"); intent.TargetLocator = $"By.XPath(\"//*[normalize-space(text())='{safeText}']\")"; }
+                            else if (!string.IsNullOrWhiteSpace(interaction.Classes)) { string cleanClasses = string.Join(".", interaction.Classes.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)); intent.TargetLocator = $"By.CssSelector(\"{interaction.TagName}.{cleanClasses}\")"; }
+                            else if (!string.IsNullOrWhiteSpace(interaction.TagName)) intent.TargetLocator = $"By.TagName(\"{interaction.TagName}\")";
+                        }
                     }
                     else if (rawMain != null)
                     {
-                        string pTitle = rawMain.ObservedContext?.PageTitle;
-                        string sName = rawMain.StepName;
+                        string pTitle = rawMain.ObservedContext?.PageTitle; string sName = rawMain.StepName;
                         if (!string.IsNullOrWhiteSpace(pTitle)) { rawText = pTitle; if (rawText.Contains("-")) rawText = rawText.Split('-')[0]; if (rawText.Contains("|")) rawText = rawText.Split('|')[0]; }
                         else if (!string.IsNullOrWhiteSpace(sName) && !sName.ToLower().Contains("nova a")) rawText = sName;
                         else rawText = "carregamento atual";
@@ -155,27 +140,17 @@ namespace LiteAutomation.Generators.CSharp
                     }
                 }
 
-                // 3. GRAMÁTICA NLP
+                if (!string.IsNullOrWhiteSpace(rawText)) { rawText = Regex.Replace(rawText, @"[^a-zA-Z0-9\sÀ-ÿ]", " ").Trim(); rawText = Regex.Replace(rawText, @"\s+", " "); if (rawText.Length > 40) rawText = rawText.Substring(0, 40).Trim(); }
+
                 string humanName = SemanticNlpEngine.GenerateHumanReadable(rawText, role);
                 string camelCaseName = SemanticNlpEngine.GenerateVariableName(rawText, role);
-
                 bool isFemaleTarget = humanName.StartsWith(LanguageManager.GetString("NlpScreen")) || humanName.StartsWith(LanguageManager.GetString("NlpPage")) || humanName.StartsWith(LanguageManager.GetString("NlpList"));
 
-                // 🚀 FIX 2: Garante que seletores vazios de validação não se chamem "ElGenerico" mas sim "Tela"
                 string locLower = intent.TargetLocator?.ToLower() ?? "";
-                bool isGhostElement = locLower.Contains("body") || role == "document" ||
-                                      string.IsNullOrEmpty(intent.TargetLocator) ||
-                                      intent.TargetLocator.Contains("VAZIO") ||
-                                      intent.TargetLocator.Contains("NÃO ENCONTRADO") ||
-                                      intent.TargetLocator.Contains("AMBÍGUO");
+                bool isGhostElement = locLower.Contains("body") || role == "document" || string.IsNullOrEmpty(intent.TargetLocator) || intent.TargetLocator.Contains("VAZIO");
+                if (intent.Type == IntentType.Click && !string.IsNullOrWhiteSpace(role) && role != "document" && role != "body") isGhostElement = false;
 
-                if (isGhostElement)
-                {
-                    humanName = LanguageManager.GetString("NlpScreen") + rawText.Trim().ToLower();
-                    camelCaseName = "tela" + Capitalize(SemanticNlpEngine.GenerateVariableName(rawText, "").Replace("el", ""));
-                    isFemaleTarget = true;
-                }
-
+                if (isGhostElement) { humanName = LanguageManager.GetString("NlpScreen") + rawText.Trim().ToLower(); camelCaseName = "tela" + Capitalize(SemanticNlpEngine.GenerateVariableName(rawText, "").Replace("el", "")); isFemaleTarget = true; }
                 if (string.IsNullOrWhiteSpace(camelCaseName) || camelCaseName.Length < 3) camelCaseName = "elTarget";
 
                 string art = isFemaleTarget ? LanguageManager.GetString("GrammarArtF") : LanguageManager.GetString("GrammarArtM");
@@ -184,30 +159,15 @@ namespace LiteAutomation.Generators.CSharp
                 string suffix = isFemaleTarget ? LanguageManager.GetString("GrammarSuffixF") : LanguageManager.GetString("GrammarSuffixM");
 
                 string phaseContext = "";
-                if (isCanonical)
-                {
-                    if (i == 0 && intent.Type == IntentType.NavigateToUrl) phaseContext = kwGiven;
-                    else if (lastActionIndex != -1 && i > lastActionIndex) phaseContext = kwThen;
-                    else if (lastActionIndex == -1 && (intent.Type == IntentType.AssertVisible || intent.Type == IntentType.AssertEnabled || intent.Type == IntentType.WaitUrlChange)) phaseContext = kwThen;
-                    else phaseContext = kwWhen;
-                }
-                else
-                {
-                    if (intent.Type == IntentType.NavigateToUrl) phaseContext = kwGiven;
-                    else if (intent.Type == IntentType.WaitUrlChange || intent.Type == IntentType.AssertVisible || intent.Type == IntentType.AssertEnabled) phaseContext = kwThen;
-                    else phaseContext = kwWhen;
-                }
+                if (i == 0) phaseContext = kwGiven;
+                else if (isCanonical) { if (lastActionIndex != -1 && i > lastActionIndex) phaseContext = kwThen; else phaseContext = kwWhen; }
+                else { if (intent.Type == IntentType.WaitUrlChange || intent.Type == IntentType.AssertVisible || intent.Type == IntentType.AssertEnabled) phaseContext = kwThen; else phaseContext = kwWhen; }
 
                 string gherkinKeyword = (phaseContext == lastContext) ? kwAnd : phaseContext;
                 lastContext = phaseContext;
                 string stepDefAttribute = phaseContext == kwGiven ? LanguageManager.GetString("BddAttrGiven") : (phaseContext == kwThen ? LanguageManager.GetString("BddAttrThen") : LanguageManager.GetString("BddAttrWhen"));
 
-                // 4. LÓGICA DE POM: MAPEAR LOCATOR ÚNICO APENAS SE NECESSÁRIO
-                // 🚀 FIX 3: Impede lixo na classe Page ("ElGenerico") se a ação não usa um FindElement
-                bool requiresLocator = intent.Type != IntentType.NavigateToUrl &&
-                                       intent.Type != IntentType.WaitUrlChange &&
-                                       intent.Type != IntentType.Blur;
-
+                bool requiresLocator = intent.Type != IntentType.NavigateToUrl && intent.Type != IntentType.WaitUrlChange && intent.Type != IntentType.Blur;
                 string locatorPropName = "";
                 if (requiresLocator)
                 {
@@ -215,150 +175,58 @@ namespace LiteAutomation.Generators.CSharp
                     locatorPropName = EnsureUniqueLocatorProp(activePage.Locators, camelCaseName, rawLocator, intent.StepId);
                 }
 
-                string varName = "";
-                var args = new object[] { art, humanName, varName, prepEm, prepDe, suffix, intent.Type.ToString() };
+                string varName = ""; var args = new object[] { art, humanName, varName, prepEm, prepDe, suffix, intent.Type.ToString() };
+                var step = new StepDef { Keyword = gherkinKeyword, StepDefAttribute = stepDefAttribute, StepId = intent.StepId, Diagnostics = intent.Diagnostics };
 
-                var step = new StepDef
-                {
-                    Keyword = gherkinKeyword,
-                    StepDefAttribute = stepDefAttribute,
-                    StepId = intent.StepId,
-                    Diagnostics = intent.Diagnostics
-                };
-
-                // 5. FRASES DO GHERKIN E PARÂMETROS
                 switch (intent.Type)
                 {
-                    case IntentType.NavigateToUrl:
-                        step.GherkinText = isCanonical ? LanguageManager.GetString("BddAccessSysCanon") : LanguageManager.GetString("BddAccessSysNarr");
-                        step.StepDefText = step.GherkinText;
-                        break;
-                    case IntentType.Click:
-                        step.GherkinText = isCanonical ? string.Format(LanguageManager.GetString("BddClickCanon"), args) : string.Format(LanguageManager.GetString("BddClickNarr"), args);
-                        step.StepDefText = step.GherkinText;
-                        break;
-                    case IntentType.Hover:
-                        step.GherkinText = isCanonical ? string.Format(LanguageManager.GetString("BddHoverCanon"), args) : string.Format(LanguageManager.GetString("BddHoverNarr"), args);
-                        step.StepDefText = step.GherkinText;
-                        break;
-                    case IntentType.Blur:
-                        step.GherkinText = isCanonical ? LanguageManager.GetString("BddBlurCanon") : LanguageManager.GetString("BddBlurNarr");
-                        step.StepDefText = step.GherkinText;
-                        break;
+                    case IntentType.Click: step.GherkinText = isCanonical ? string.Format(LanguageManager.GetString("BddClickCanon"), args) : string.Format(LanguageManager.GetString("BddClickNarr"), args); step.StepDefText = step.GherkinText; break;
+                    case IntentType.KeyPress: step.GherkinText = $"aciono a tecla {intent.Key.ToUpper()} no {humanName}"; step.StepDefText = step.GherkinText; break;
                     case IntentType.InputText:
-                        varName = EnsureUniqueVar(examples, camelCaseName, intent.Value ?? "");
-                        args[2] = varName;
+                        string paramName = camelCaseName; if (paramName.StartsWith("input", StringComparison.OrdinalIgnoreCase) && paramName.Length > 5) { paramName = paramName.Substring(5); paramName = char.ToLower(paramName[0]) + paramName.Substring(1); }
+                        else if (paramName.StartsWith("campo", StringComparison.OrdinalIgnoreCase) && paramName.Length > 5) { paramName = paramName.Substring(5); paramName = char.ToLower(paramName[0]) + paramName.Substring(1); }
+                        varName = EnsureUniqueVar(examples, paramName, intent.Value ?? ""); args[2] = varName;
                         step.GherkinText = isCanonical ? string.Format(LanguageManager.GetString("BddInputCanon"), args) : string.Format(LanguageManager.GetString("BddInputNarr"), args);
-                        step.StepDefText = (isCanonical ? string.Format(LanguageManager.GetString("BddInputDefCanon"), args) : string.Format(LanguageManager.GetString("BddInputDefNarr"), args)) + "\"\"(.*)\"\"";
-                        step.MethodParams = $"string {varName}";
-                        break;
-                    case IntentType.WaitUrlChange:
-                        step.GherkinText = isCanonical ? (phaseContext == kwThen ? LanguageManager.GetString("BddWaitThenCanon") : LanguageManager.GetString("BddWaitWhenCanon")) : LanguageManager.GetString("BddWaitNarr");
-                        step.StepDefText = step.GherkinText;
-                        break;
-                    case IntentType.AssertVisible:
-                        step.GherkinText = isCanonical ? (phaseContext == kwThen ? string.Format(LanguageManager.GetString("BddAssertVisThenCanon"), args) : string.Format(LanguageManager.GetString("BddAssertVisWhenCanon"), args)) : string.Format(LanguageManager.GetString("BddAssertVisNarr"), args);
-                        step.StepDefText = step.GherkinText;
-                        break;
-                    case IntentType.AssertEnabled:
-                        step.GherkinText = isCanonical ? (phaseContext == kwThen ? string.Format(LanguageManager.GetString("BddAssertEnThenCanon"), args) : string.Format(LanguageManager.GetString("BddAssertEnWhenCanon"), args)) : string.Format(LanguageManager.GetString("BddAssertEnNarr"), args);
-                        step.StepDefText = step.GherkinText;
-                        break;
-                    default:
-                        step.GherkinText = string.Format(LanguageManager.GetString("BddDefaultIntent"), args);
-                        step.StepDefText = step.GherkinText;
-                        break;
+                        step.StepDefText = (isCanonical ? string.Format(LanguageManager.GetString("BddInputDefCanon"), args) : string.Format(LanguageManager.GetString("BddInputDefNarr"), args)) + "\"(.*)\"";
+                        step.MethodParams = $"string {varName}"; break;
+                    case IntentType.AssertVisible: step.GherkinText = isCanonical ? (phaseContext == kwThen ? string.Format(LanguageManager.GetString("BddAssertVisThenCanon"), args) : string.Format(LanguageManager.GetString("BddAssertVisWhenCanon"), args)) : string.Format(LanguageManager.GetString("BddAssertVisNarr"), args); step.StepDefText = step.GherkinText; break;
+                    default: step.GherkinText = string.Format(LanguageManager.GetString("BddDefaultIntent"), args); step.StepDefText = step.GherkinText; break;
                 }
 
-                // 6. DESDUPLICAÇÃO GHERKIN
-                string baseGherkin = step.GherkinText;
-                string baseStepDef = step.StepDefText;
-                string genericTerm = LanguageManager.GetString("NlpGenericVar").ToLower();
-                bool isGenericPage = string.IsNullOrWhiteSpace(currentPageName) || currentPageName.ToLower().Contains("generic") || currentPageName.ToLower().Contains(genericTerm);
+                if (i == 0 && intent.Type == IntentType.AssertVisible) { step.GherkinText = $"estou na {humanName}"; step.StepDefText = step.GherkinText; }
+
+                string baseGherkin = step.GherkinText; string baseStepDef = step.StepDefText;
+                string genericTerm = LanguageManager.GetString("NlpGenericVar").ToLower(); bool isGenericPage = string.IsNullOrWhiteSpace(currentPageName) || currentPageName.ToLower().Contains("generic") || currentPageName.ToLower().Contains(genericTerm);
 
                 if (!gherkinTextCounts.ContainsKey(baseGherkin)) gherkinTextCounts[baseGherkin] = 1;
                 else
                 {
-                    gherkinTextCounts[baseGherkin]++;
-                    string onScreenText = $"{LanguageManager.GetString("GrammarInF")} {LanguageManager.GetString("NlpScreen").Trim()} {currentPageName}".Trim();
-                    string gherkinWithPage = $"{baseGherkin} {onScreenText}";
-
-                    if (!isGenericPage && !gherkinTextCounts.ContainsKey(gherkinWithPage))
-                    {
-                        gherkinTextCounts[gherkinWithPage] = 1;
-                        step.GherkinText = gherkinWithPage; step.StepDefText = $"{baseStepDef} {onScreenText}";
-                    }
-                    else
-                    {
-                        string targetKey = isGenericPage ? baseGherkin : gherkinWithPage;
-                        if (!gherkinTextCounts.ContainsKey(targetKey)) gherkinTextCounts[targetKey] = 1; else gherkinTextCounts[targetKey]++;
-                        step.GherkinText = $"{(isGenericPage ? baseGherkin : gherkinWithPage)} {gherkinTextCounts[targetKey]}";
-                        step.StepDefText = $"{(isGenericPage ? baseStepDef : $"{baseStepDef} {onScreenText}")} {gherkinTextCounts[targetKey]}";
-                    }
+                    gherkinTextCounts[baseGherkin]++; string onScreenText = $"{LanguageManager.GetString("GrammarInF")} {LanguageManager.GetString("NlpScreen").Trim()} {currentPageName}".Trim(); string gherkinWithPage = $"{baseGherkin} {onScreenText}";
+                    if (!isGenericPage && !gherkinTextCounts.ContainsKey(gherkinWithPage)) { gherkinTextCounts[gherkinWithPage] = 1; step.GherkinText = gherkinWithPage; step.StepDefText = $"{baseStepDef} {onScreenText}"; }
+                    else { string targetKey = isGenericPage ? baseGherkin : gherkinWithPage; if (!gherkinTextCounts.ContainsKey(targetKey)) gherkinTextCounts[targetKey] = 1; else gherkinTextCounts[targetKey]++; step.GherkinText = $"{(isGenericPage ? baseGherkin : gherkinWithPage)} {gherkinTextCounts[targetKey]}"; step.StepDefText = $"{(isGenericPage ? baseStepDef : $"{baseStepDef} {onScreenText}")} {gherkinTextCounts[targetKey]}"; }
                 }
 
-                // 7. CRIAÇÃO DOS MÉTODOS (STEP E ACTION)
-                string methodVerb = intent.Type switch
-                {
-                    IntentType.NavigateToUrl => LanguageManager.GetString("MethodAccess"),
-                    IntentType.Click => LanguageManager.GetString("MethodClick"),
-                    IntentType.Hover => LanguageManager.GetString("MethodHover"),
-                    IntentType.Blur => LanguageManager.GetString("MethodBlur"),
-                    IntentType.InputText => LanguageManager.GetString("MethodFill"),
-                    IntentType.WaitUrlChange => LanguageManager.GetString("MethodWait"),
-                    IntentType.AssertVisible => LanguageManager.GetString("MethodVerifyVis"),
-                    IntentType.AssertEnabled => LanguageManager.GetString("MethodVerifyEn"),
-                    _ => "Executar"
-                };
-
-                string targetSuffix = intent.Type switch
-                {
-                    IntentType.NavigateToUrl => "Sistema",
-                    IntentType.Blur => "Menus",
-                    IntentType.WaitUrlChange => "Pagina",
-                    _ => locatorPropName
-                };
-
+                string methodVerb = intent.Type switch { IntentType.NavigateToUrl => LanguageManager.GetString("MethodAccess"), IntentType.Click => LanguageManager.GetString("MethodClick"), IntentType.KeyPress => "AcionarTecla", IntentType.InputText => LanguageManager.GetString("MethodFill"), IntentType.AssertVisible => LanguageManager.GetString("MethodVerifyVis"), _ => "Executar" };
+                string targetSuffix = intent.Type switch { IntentType.NavigateToUrl => "Sistema", IntentType.WaitUrlChange => "Pagina", _ => locatorPropName };
                 string dedupeSuffix = Regex.Match(step.GherkinText, @"\d+$").Success ? Regex.Match(step.GherkinText, @"\d+$").Value : "";
                 string pageSuffix = isGenericPage ? "" : Capitalize(RemoveAccents(currentPageName).Replace(" ", ""));
 
-                // Nome da Ação na classe de Actions
-                string baseActionName = $"{methodVerb}{targetSuffix}{dedupeSuffix}";
-                string safeActionName = baseActionName;
-                int actCounter = 1;
-                while (activePage.Actions.Any(a => a.MethodName == safeActionName))
-                {
-                    actCounter++; safeActionName = $"{baseActionName}Alt{actCounter}";
-                }
+                string baseActionName = $"{methodVerb}{targetSuffix}{dedupeSuffix}"; string safeActionName = baseActionName; int actCounter = 1;
+                while (activePage.Actions.Any(a => a.MethodName == safeActionName)) { actCounter++; safeActionName = $"{baseActionName}Alt{actCounter}"; }
 
-                var newAction = new ActionDef
-                {
-                    MethodName = safeActionName,
-                    MethodParams = step.MethodParams,
-                    ErrorMsg = intent.FriendlyErrorMessage,
-                    StepId = intent.StepId,
-                    Diagnostics = intent.Diagnostics
-                };
-                newAction.CodeBody = GeneratePomActionCode(intent, locatorPropName, varName);
-                activePage.Actions.Add(newAction);
+                var newAction = new ActionDef { MethodName = safeActionName, MethodParams = step.MethodParams, ErrorMsg = intent.FriendlyErrorMessage, StepId = intent.StepId, Diagnostics = intent.Diagnostics };
+                newAction.CodeBody = GeneratePomActionCode(intent, locatorPropName, varName); activePage.Actions.Add(newAction);
 
-                // Nome da Action na classe Step Definitions
                 step.MethodName = $"{methodVerb}{targetSuffix}{pageSuffix}{dedupeSuffix}";
-                string actionCallArgs = string.IsNullOrEmpty(varName) ? "" : varName;
-                string actionInstanceName = $"_{Char.ToLower(activePage.ActionClassName[0]) + activePage.ActionClassName.Substring(1)}";
+                string actionCallArgs = string.IsNullOrEmpty(varName) ? "" : varName; string actionInstanceName = $"_{char.ToLower(activePage.ActionClassName[0])}{activePage.ActionClassName.Substring(1)}";
                 step.ActionCallCode = $"{actionInstanceName}.{newAction.MethodName}({actionCallArgs});";
-
                 stepDefinitions.Add(step);
             }
 
-            // =====================================================================
-            // MONTAGEM DOS 4 ARTEFATOS NO STRINGBUILDER
-            // =====================================================================
             sb.AppendLine("// =====================================================================");
             sb.AppendLine($"// 👑 {LanguageManager.GetString("LblPattern").ToUpper()}: BDD POM HYBRID (4 LAYERS)");
             sb.AppendLine("// =====================================================================\n");
 
-            // 1. FEATURE FILE
             sb.AppendLine($"// =====================================================================");
             sb.AppendLine($"// 📁 {LanguageManager.GetString("PomFeatureFile")}");
             sb.AppendLine($"// =====================================================================");
@@ -375,8 +243,6 @@ namespace LiteAutomation.Generators.CSharp
             sb.AppendLine("*/\n");
 
             sb.AppendLine("using System;\nusing TechTalk.SpecFlow;\nusing OpenQA.Selenium;\nusing OpenQA.Selenium.Chrome;\nusing OpenQA.Selenium.Support.UI;\nusing NUnit.Framework;\n");
-
-            // 2. PAGE OBJECTS
             sb.AppendLine($"// =====================================================================");
             sb.AppendLine($"// 📁 {LanguageManager.GetString("PomPageClass")}");
             sb.AppendLine($"// =====================================================================");
@@ -384,16 +250,11 @@ namespace LiteAutomation.Generators.CSharp
             foreach (var page in pageDictionary.Values)
             {
                 sb.AppendLine($"    public class {page.ClassName}\n    {{");
-                foreach (var loc in page.Locators)
-                {
-                    sb.AppendLine($"        // {LanguageManager.GetString("LogStep")} {loc.Value.StepId}");
-                    sb.AppendLine($"        public By {loc.Key} = {loc.Value.RawLocator};");
-                }
+                foreach (var loc in page.Locators) { sb.AppendLine($"        // {LanguageManager.GetString("LogStep")} {loc.Value.StepId}"); sb.AppendLine($"        public By {loc.Key} = {loc.Value.RawLocator};"); }
                 sb.AppendLine($"    }}\n");
             }
             sb.AppendLine("}\n");
 
-            // 3. ACTIONS
             sb.AppendLine($"// =====================================================================");
             sb.AppendLine($"// 📁 {LanguageManager.GetString("PomActionClass")}");
             sb.AppendLine($"// =====================================================================");
@@ -402,147 +263,100 @@ namespace LiteAutomation.Generators.CSharp
             foreach (var page in pageDictionary.Values)
             {
                 sb.AppendLine($"    public class {page.ActionClassName}\n    {{");
-                sb.AppendLine($"        private IWebDriver driver;");
-                sb.AppendLine($"        private WebDriverWait wait;");
-                sb.AppendLine($"        private {page.ClassName} _page;\n");
-                sb.AppendLine($"        public {page.ActionClassName}(IWebDriver driver, WebDriverWait wait)\n        {{");
-                sb.AppendLine($"            this.driver = driver;\n            this.wait = wait;\n            this._page = new {page.ClassName}();\n        }}\n");
-
+                sb.AppendLine($"        private IWebDriver driver;\n        private WebDriverWait wait;\n        private {page.ClassName} _page;\n");
+                sb.AppendLine($"        public {page.ActionClassName}(IWebDriver driver, WebDriverWait wait)\n        {{\n            this.driver = driver;\n            this.wait = wait;\n            this._page = new {page.ClassName}();\n        }}\n");
                 foreach (var action in page.Actions)
                 {
                     sb.AppendLine($"        // {LanguageManager.GetString("LogStep")} {action.StepId}");
-                    if (config.IncludeReport && !string.IsNullOrWhiteSpace(action.Diagnostics))
-                    {
-                        var diag = action.Diagnostics.Trim();
-                        if (!diag.StartsWith("//")) diag = "// " + diag;
-                        sb.AppendLine($"        {diag}");
-                    }
-
+                    if (config.IncludeReport && !string.IsNullOrWhiteSpace(action.Diagnostics)) { var diag = action.Diagnostics.Trim(); if (!diag.StartsWith("//")) diag = "// " + diag; sb.AppendLine($"        {diag}"); }
                     sb.AppendLine($"        public void {action.MethodName}({action.MethodParams})\n        {{");
-                    if (!string.IsNullOrEmpty(action.ErrorMsg))
-                    {
-                        sb.AppendLine($"            try\n            {{");
-                        foreach (var line in action.CodeBody.Split('\n')) if (!string.IsNullOrWhiteSpace(line)) sb.AppendLine($"                {line.TrimEnd()}");
-                        sb.AppendLine($"            }}\n            catch (WebDriverTimeoutException)\n            {{\n                Assert.Fail(\"{action.ErrorMsg}\");\n            }}");
-                    }
-                    else
-                    {
-                        foreach (var line in action.CodeBody.Split('\n')) if (!string.IsNullOrWhiteSpace(line)) sb.AppendLine($"            {line.TrimEnd()}");
-                    }
+                    if (!string.IsNullOrEmpty(action.ErrorMsg)) { sb.AppendLine($"            try\n            {{"); foreach (var line in action.CodeBody.Split('\n')) if (!string.IsNullOrWhiteSpace(line)) sb.AppendLine($"                {line.TrimEnd()}"); sb.AppendLine($"            }}\n            catch (WebDriverTimeoutException)\n            {{\n                Assert.Fail(\"{action.ErrorMsg}\");\n            }}"); }
+                    else { foreach (var line in action.CodeBody.Split('\n')) if (!string.IsNullOrWhiteSpace(line)) sb.AppendLine($"            {line.TrimEnd()}"); }
                     sb.AppendLine($"        }}\n");
                 }
                 sb.AppendLine($"    }}\n");
             }
             sb.AppendLine("}\n");
 
-            // 4. STEPS DEFINITIONS
             sb.AppendLine($"// =====================================================================");
             sb.AppendLine($"// 📁 {LanguageManager.GetString("PomStepClass")}");
             sb.AppendLine($"// =====================================================================");
             sb.AppendLine("namespace LiteAutomation.GeneratedTests.Steps\n{");
             sb.AppendLine("    using LiteAutomation.GeneratedTests.Actions;\n");
-            sb.AppendLine($"    [Binding]");
-            sb.AppendLine($"    public class {testClassName}Steps\n    {{");
-            sb.AppendLine($"        private IWebDriver driver;");
-            sb.AppendLine($"        private WebDriverWait wait;");
-            foreach (var page in pageDictionary.Values)
+            sb.AppendLine($"    [Binding]\n    public class {testClassName}Steps\n    {{");
+            sb.AppendLine($"        private IWebDriver driver;\n        private WebDriverWait wait;");
+            foreach (var page in pageDictionary.Values) { string actionVar = $"_{char.ToLower(page.ActionClassName[0])}{page.ActionClassName.Substring(1)}"; sb.AppendLine($"        private {page.ActionClassName} {actionVar};"); }
+
+            // 🚀 SEU SETUP ANTI-BOT E NAVEGAÇÃO INICIAL
+            sb.AppendLine($"\n        [BeforeScenario]");
+            sb.AppendLine($"        public void Setup()");
+            sb.AppendLine($"        {{");
+            sb.AppendLine($"            var options = new ChromeOptions();");
+            sb.AppendLine($"            options.AddExcludedArgument(\"enable-automation\");");
+            sb.AppendLine($"            options.AddAdditionalOption(\"useAutomationExtension\", false);");
+            sb.AppendLine($"            options.AddUserProfilePreference(\"credentials_enable_service\", false);");
+            sb.AppendLine($"            options.AddUserProfilePreference(\"profile.password_manager_enabled\", false);");
+            sb.AppendLine($"            options.AddArgument(\"--disable-blink-features=AutomationControlled\");");
+            sb.AppendLine($"            options.AddArgument(\"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36\");");
+            sb.AppendLine($"");
+            sb.AppendLine($"            driver = new ChromeDriver(options);");
+            sb.AppendLine($"            driver.Manage().Window.Maximize();");
+            sb.AppendLine($"            wait = new WebDriverWait(driver, TimeSpan.FromSeconds(10));");
+
+            var firstStepWithUrl = workspace.RawSteps?.FirstOrDefault(s => s.ObservedContext != null && !string.IsNullOrEmpty(s.ObservedContext.Url));
+            if (firstStepWithUrl != null)
             {
-                string actionVar = $"_{Char.ToLower(page.ActionClassName[0]) + page.ActionClassName.Substring(1)}";
-                sb.AppendLine($"        private {page.ActionClassName} {actionVar};");
+                sb.AppendLine($"\n            driver.Navigate().GoToUrl(\"{firstStepWithUrl.ObservedContext.Url}\");\n");
             }
 
-            sb.AppendLine($"\n        [BeforeScenario]\n        public void Setup()\n        {{");
-            sb.AppendLine($"            var options = new ChromeOptions();\n            options.AddArgument(\"--disable-blink-features=AutomationControlled\");\n            driver = new ChromeDriver(options);\n            driver.Manage().Window.Maximize();\n            wait = new WebDriverWait(driver, TimeSpan.FromSeconds(10));\n");
-            foreach (var page in pageDictionary.Values)
-            {
-                string actionVar = $"_{Char.ToLower(page.ActionClassName[0]) + page.ActionClassName.Substring(1)}";
-                sb.AppendLine($"            {actionVar} = new {page.ActionClassName}(driver, wait);");
-            }
+            foreach (var page in pageDictionary.Values) { string actionVar = $"_{char.ToLower(page.ActionClassName[0])}{page.ActionClassName.Substring(1)}"; sb.AppendLine($"            {actionVar} = new {page.ActionClassName}(driver, wait);"); }
             sb.AppendLine($"        }}\n");
-            sb.AppendLine($"        [AfterScenario]\n        public void Teardown()\n        {{\n            driver?.Dispose();\n        }}\n");
+
+            // 🚀 SEU TEARDOWN ATUALIZADO
+            sb.AppendLine($"        [AfterScenario]");
+            sb.AppendLine($"        public void Teardown()");
+            sb.AppendLine($"        {{");
+            sb.AppendLine($"            driver?.Dispose();");
+            sb.AppendLine($"            driver = null;");
+            sb.AppendLine($"        }}\n");
 
             var uniqueStepDefs = new HashSet<string>();
             foreach (var step in stepDefinitions)
             {
-                string safeMethodName = step.MethodName;
-                int safetyCounter = 1;
+                string safeMethodName = step.MethodName; int safetyCounter = 1;
                 while (uniqueStepDefs.Contains(safeMethodName)) { safetyCounter++; safeMethodName = $"{step.MethodName}Alt{safetyCounter}"; }
                 uniqueStepDefs.Add(safeMethodName);
 
-                sb.AppendLine($"        [{step.StepDefAttribute}(@\"{step.StepDefText}\")]");
-                sb.AppendLine($"        public void {safeMethodName}({step.MethodParams})\n        {{");
+                sb.AppendLine($"        [{step.StepDefAttribute}(@\"{step.StepDefText}\")]\n        public void {safeMethodName}({step.MethodParams})\n        {{");
                 sb.AppendLine($"            // {LanguageManager.GetString("LogStep")} {step.StepId}");
-                if (config.IncludeReport && !string.IsNullOrWhiteSpace(step.Diagnostics))
-                {
-                    var diag = step.Diagnostics.Trim();
-                    if (!diag.StartsWith("//")) diag = "// " + diag;
-                    sb.AppendLine($"            {diag}");
-                }
-
-                sb.AppendLine($"            {step.ActionCallCode}");
-                sb.AppendLine($"        }}\n");
+                if (config.IncludeReport && !string.IsNullOrWhiteSpace(step.Diagnostics)) { var diag = step.Diagnostics.Trim(); if (!diag.StartsWith("//")) diag = "// " + diag; sb.AppendLine($"            {diag}"); }
+                sb.AppendLine($"            {step.ActionCallCode}\n        }}\n");
             }
             sb.AppendLine($"    }}\n}}");
-
             return sb.ToString();
         }
 
-        private string EnsureUniqueVar(Dictionary<string, string> examples, string baseName, string value)
-        {
-            string varName = string.IsNullOrEmpty(baseName) ? "valor" : baseName;
-            int counter = 1;
-            while (examples.ContainsKey(varName) && examples[varName] != value) { counter++; varName = baseName + counter; }
-            examples[varName] = value; return varName;
-        }
-
-        private string EnsureUniqueLocatorProp(Dictionary<string, LocatorDef> locators, string baseName, string rawLocator, string stepId)
-        {
-            string propName = Capitalize(baseName);
-            if (string.IsNullOrEmpty(propName)) propName = "Elemento";
-            int counter = 1; string currentName = propName;
-
-            while (locators.ContainsKey(currentName) && locators[currentName].RawLocator != rawLocator)
-            {
-                counter++;
-                currentName = propName + counter;
-            }
-
-            if (!locators.ContainsKey(currentName)) locators[currentName] = new LocatorDef { RawLocator = rawLocator, StepId = stepId };
-            else if (!locators[currentName].StepId.Split(new[] { ", " }, StringSplitOptions.None).Contains(stepId)) locators[currentName].StepId += $", {stepId}";
-
-            return currentName;
-        }
+        private string EnsureUniqueVar(Dictionary<string, string> examples, string baseName, string value) { string varName = string.IsNullOrEmpty(baseName) ? "valor" : baseName; int counter = 1; while (examples.ContainsKey(varName) && examples[varName] != value) { counter++; varName = baseName + counter; } examples[varName] = value; return varName; }
+        private string EnsureUniqueLocatorProp(Dictionary<string, LocatorDef> locators, string baseName, string rawLocator, string stepId) { string propName = Capitalize(baseName); if (string.IsNullOrEmpty(propName)) propName = "Elemento"; int counter = 1; string currentName = propName; while (locators.ContainsKey(currentName) && locators[currentName].RawLocator != rawLocator) { counter++; currentName = propName + counter; } if (!locators.ContainsKey(currentName)) locators[currentName] = new LocatorDef { RawLocator = rawLocator, StepId = stepId }; else if (!locators[currentName].StepId.Split(new[] { ", " }, StringSplitOptions.None).Contains(stepId)) locators[currentName].StepId += $", {stepId}"; return currentName; }
 
         private string GeneratePomActionCode(AutomationIntent intent, string propName, string varName)
         {
             string loc = string.IsNullOrEmpty(propName) ? "" : $"_page.{propName}";
             switch (intent.Type)
             {
-                case IntentType.NavigateToUrl: return $"driver.Navigate().GoToUrl(\"{intent.Value}\");";
-                case IntentType.WaitUrlChange: return $"wait.Until(d => d.Url.Contains(\"{intent.Value}\"));";
                 case IntentType.Click: return $"var el = wait.Until(d => d.FindElement({loc}));\n((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].scrollIntoView({{block: 'center'}});\", el);\ntry\n{{\n    el.Click();\n}}\ncatch\n{{\n    ((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].click();\", el);\n}}";
-                case IntentType.Hover: return $"var el = wait.Until(d => d.FindElement({loc}));\nnew OpenQA.Selenium.Interactions.Actions(driver).MoveToElement(el).Perform();";
-                case IntentType.Blur: return $"driver.FindElement(By.TagName(\"body\")).Click();";
-                case IntentType.InputText: return $"var el = wait.Until(d => d.FindElement({loc}));\nel.Clear();\nel.SendKeys({varName});";
-                case IntentType.KeyPress: return $"wait.Until(d => d.FindElement({loc})).SendKeys({MapKey(intent.Key)});";
-                case IntentType.ScrollTo: return $"var el = wait.Until(d => d.FindElement({loc}));\n((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].scrollIntoView({{block: 'center'}});\", el);";
+                case IntentType.InputText:
+                    string safeInput = intent.Value != null ? intent.Value.Replace("\"", "\\\"") : "";
+                    string sendKeysLine = string.IsNullOrEmpty(varName) ? $"el.SendKeys(\"{safeInput}\");" : $"el.SendKeys({varName});";
+                    return $"var el = wait.Until(d => d.FindElement({loc}));\nel.Clear();\n{sendKeysLine}";
+                case IntentType.KeyPress: return $"var el = wait.Until(d => d.FindElement({loc}));\nel.SendKeys({MapKey(intent.Key)});\nSystem.Threading.Thread.Sleep(500);";
                 case IntentType.AssertVisible: return $"Assert.IsTrue(wait.Until(d => d.FindElement({loc})).Displayed);";
-                case IntentType.AssertEnabled: return $"wait.Until(d => d.FindElement({loc}).Enabled);";
                 default: return "";
             }
         }
 
-        private string FormatLocator(string loc)
-        {
-            // 🚀 FIX 4: Tratamento blindado convertendo qualquer vazio em Body!
-            if (string.IsNullOrEmpty(loc) || loc.Contains("VAZIO") || loc.Contains("NÃO ENCONTRADO") || loc.Contains("AMBÍGUO"))
-                return "By.TagName(\"body\")";
-            if (loc.StartsWith("By.") || loc.StartsWith("Page.")) return loc;
-            if (loc.StartsWith("/") || loc.StartsWith("(")) return $"By.XPath(\"{loc}\")";
-            return $"By.CssSelector(\"{loc}\")";
-        }
-
-        private string MapKey(string key) => key.ToLower() switch { "enter" => "Keys.Enter", "tab" => "Keys.Tab", "escape" => "Keys.Escape", "space" => "Keys.Space", _ => $"\"{key}\"" };
+        private string MapKey(string key) => key?.ToLower().Replace("keypress_", "") switch { "enter" => "Keys.Enter", "tab" => "Keys.Tab", "escape" => "Keys.Escape", "space" => "Keys.Space", _ => $"\"{key}\"" };
+        private string FormatLocator(string loc) { if (string.IsNullOrEmpty(loc) || loc.Contains("VAZIO") || loc.Contains("NÃO ENCONTRADO") || loc.Contains("AMBÍGUO")) return "By.TagName(\"body\")"; if (loc.StartsWith("By.") || loc.StartsWith("Page.")) return loc; if (loc.StartsWith("xpath=") || loc.StartsWith("/") || loc.StartsWith("(")) return $"By.XPath(\"{loc.Replace("xpath=", "")}\")"; if (loc.StartsWith("css=")) return $"By.CssSelector(\"{loc.Replace("css=", "")}\")"; return $"By.CssSelector(\"{loc}\")"; }
         private string Capitalize(string text) { if (string.IsNullOrEmpty(text)) return text; return char.ToUpper(text[0]) + text.Substring(1); }
         private string RemoveAccents(string text) { var n = text.Normalize(NormalizationForm.FormD); var sb = new StringBuilder(); foreach (var c in n) { if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark) sb.Append(c); } return sb.ToString().Normalize(NormalizationForm.FormC); }
     }

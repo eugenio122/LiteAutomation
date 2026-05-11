@@ -9,13 +9,14 @@ namespace LiteAutomation.Core
 {
     public static class LocatorEngine
     {
-        public static string GetDiagnostics(MicroStepDto micro, AutomationStrategy strategy, string indent = "            ")
+        // 🚀 CORREÇÃO AQUI: Recebe o CapturedDataDto (Coração do nó) no lugar do antigo MicroStepDto
+        public static string GetDiagnostics(CapturedDataDto? capturedData, AutomationStrategy strategy, string indent = "            ")
         {
-            if (strategy != AutomationStrategy.Smart_Selector) return "";
+            if (strategy != AutomationStrategy.Smart_Selector || capturedData == null) return "";
 
             var sb = new StringBuilder();
-            var uiaFlags = micro.CapturedData?.Uia?.QualityFlags ?? new List<string>();
-            var bidiFlags = micro.CapturedData?.WebDriverBiDi?.QualityFlags ?? new List<string>();
+            var uiaFlags = capturedData.Uia?.QualityFlags ?? new List<string>();
+            var bidiFlags = capturedData.WebDriverBiDi?.QualityFlags ?? new List<string>();
 
             var allFlags = new List<string>();
             allFlags.AddRange(uiaFlags);

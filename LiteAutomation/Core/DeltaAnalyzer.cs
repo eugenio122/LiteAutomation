@@ -13,148 +13,167 @@ namespace LiteAutomation.Core
         public List<AutomationIntent> Analyze(List<MainStepDto> steps, GeneratorConfig config)
         {
             var rawIntents = new List<AutomationIntent>();
-            string currentUrl = "";
-            bool isFirstNavigation = true;
 
             for (int i = 0; i < steps.Count; i++)
             {
                 var mainStep = steps[i];
+                if (!mainStep.IsActive || mainStep.PendingConfirmation) continue;
+                int stepIdx = mainStep.StepIndex ?? (i + 1);
+
+                // 1. A ÂNCORA DO PRINT
+                config.LocatorOverrides.TryGetValue($"{stepIdx}.0", out string overrideLoc0);
+                string rawLoc0 = ExtractRawLocator(overrideLoc0, null, null);
+                if (string.IsNullOrEmpty(rawLoc0) || rawLoc0.Contains("VAZIO")) rawLoc0 = "css=body";
 
                 rawIntents.Add(new AutomationIntent
                 {
-                    Type = IntentType.Unknown,
+                    Type = IntentType.AssertVisible,
                     IsNewStepHeader = true,
-                    StepId = $"{mainStep.StepIndex}.0",
-                    StepDescription = string.IsNullOrWhiteSpace(mainStep.StepName) ? $"{LanguageManager.GetString("LogStep")} {mainStep.StepIndex}" : mainStep.StepName
+                    StepId = $"{stepIdx}.0",
+                    TargetLocator = rawLoc0,
+                    StepDescription = string.IsNullOrWhiteSpace(mainStep.StepName) ? $"{LanguageManager.GetString("LogStep")} {stepIdx}" : mainStep.StepName,
+                    FriendlyErrorMessage = string.Format(LanguageManager.GetString("ErrValidationFailed"), stepIdx),
+                    Diagnostics = LanguageManager.GetString("DiagEvidenceValidation")
                 });
 
-                if (mainStep.IsEvidenceOnly || mainStep.MicroSteps == null || mainStep.MicroSteps.Count == 0)
+                // 2. AS INTERAÇÕES LIMPAS
+                var cleanTrail = GetCleanInteractionTrail(mainStep.InteractionTrail);
+
+                if (!mainStep.IsEvidenceOnly && cleanTrail.Count > 0)
                 {
-                    config.LocatorOverrides.TryGetValue($"{mainStep.StepIndex}.1", out string overrideLoc);
-                    string rawLoc = ExtractRawLocator(overrideLoc, null);
-
-                    if (string.IsNullOrEmpty(rawLoc) || rawLoc.Contains("VAZIO"))
-                        rawLoc = "By.TagName(\"body\")";
-
-                    rawIntents.Add(new AutomationIntent
+                    int interactionIndex = 1;
+                    foreach (var interaction in cleanTrail)
                     {
-                        Type = IntentType.AssertVisible,
-                        StepId = $"{mainStep.StepIndex}.1",
-                        TargetLocator = rawLoc,
-                        Diagnostics = LanguageManager.GetString("DiagEvidenceValidation"),
-                        FriendlyErrorMessage = string.Format(LanguageManager.GetString("ErrValidationFailed"), mainStep.StepIndex)
-                    });
-                    continue;
-                }
+                        string displayStep = $"{stepIdx}.{interactionIndex}";
+                        string action = interaction.InteractionType?.ToLower() ?? "unknown";
+                        string value = interaction.Value ?? "";
 
-                string mainUrl = mainStep.MicroSteps?.FirstOrDefault()?.CapturedData?.WebDriverBiDi?.ElementData?.Url ?? "";
-                if (!string.IsNullOrWhiteSpace(mainUrl) && mainUrl != currentUrl && !mainUrl.StartsWith("chrome"))
-                {
-                    if (isFirstNavigation)
-                    {
-                        rawIntents.Add(new AutomationIntent { Type = IntentType.NavigateToUrl, Value = mainUrl, FriendlyErrorMessage = string.Format(LanguageManager.GetString("ErrCriticalNavigation"), mainUrl) });
-                        isFirstNavigation = false;
-                    }
-                    else if (Uri.TryCreate(mainUrl, UriKind.Absolute, out Uri uriResult))
-                    {
-                        rawIntents.Add(new AutomationIntent { Type = IntentType.WaitUrlChange, Value = uriResult.AbsolutePath, Diagnostics = LanguageManager.GetString("DiagPageTransition"), FriendlyErrorMessage = LanguageManager.GetString("ErrNavigationTimeout") });
-                    }
-                    currentUrl = mainUrl;
-                }
+                        // 🚀 ACESSO O(1) DIRETO NA GAVETA DO EVENTO
+                        var bidi = interaction.WebDriverBiDi?.ElementData;
 
-                if (mainStep.MicroSteps != null)
-                {
-                    int microIndex = 1;
-                    foreach (var micro in mainStep.MicroSteps)
-                    {
-                        string displayStep = micro.StepId ?? $"{mainStep.StepIndex}.{microIndex}";
-                        string action = micro.ActionType?.ToLower() ?? "unknown";
-                        var bidi = micro.CapturedData?.WebDriverBiDi?.ElementData;
-                        string value = bidi?.Value ?? "";
+                        // Fake temporário apenas para a classe de Diagnósticos não quebrar
+                        var pseudoCapturedData = new CapturedDataDto { Uia = interaction.Uia, AxTree = interaction.AxTree, WebDriverBiDi = interaction.WebDriverBiDi };
 
                         config.LocatorOverrides.TryGetValue(displayStep, out string overrideLoc);
-                        string rawLocator = ExtractRawLocator(overrideLoc, bidi?.SelectorSet);
-                        string diagnostics = LocatorEngine.GetDiagnostics(micro, config.Strategy);
+                        string rawLocator = ExtractRawLocator(overrideLoc, bidi?.SelectorSet, interaction);
 
-                        // 🚀 REGRAS DE GHOST ELEMENT EXATAS (Impede que XPaths longos ou botões genéricos virem Blur)
+                        string diagnostics = pseudoCapturedData.WebDriverBiDi != null || pseudoCapturedData.Uia != null ? LocatorEngine.GetDiagnostics(pseudoCapturedData, config.Strategy) : "";
+
                         string rawLocLower = rawLocator.Trim().ToLower();
-                        bool isGhostElement = rawLocLower == "body" ||
-                                              rawLocLower == "/html/body" ||
-                                              rawLocLower == "//body" ||
-                                              rawLocLower == "by.tagname(\"body\")" ||
-                                              rawLocLower == "page.locator(\"body\")";
+                        bool isGhostElement = rawLocLower == "body" || rawLocLower == "/html/body" || rawLocLower == "//body" || rawLocLower == "css=body" || rawLocLower == "by.tagname(\"body\")";
 
                         var intent = new AutomationIntent { StepId = displayStep, TargetLocator = rawLocator, Diagnostics = diagnostics };
 
                         if (action == "click")
                         {
-                            if (isGhostElement)
-                            {
-                                intent.Type = IntentType.Blur; intent.TargetLocator = "By.TagName(\"body\")"; intent.FriendlyErrorMessage = string.Format(LanguageManager.GetString("ErrBlurFailed"), displayStep);
-                            }
-                            else
-                            {
-                                intent.Type = IntentType.Click; intent.FriendlyErrorMessage = string.Format(LanguageManager.GetString("ErrClickFailed"), displayStep);
-                            }
+                            if (isGhostElement) { intent.Type = IntentType.Blur; intent.TargetLocator = "By.TagName(\"body\")"; intent.FriendlyErrorMessage = string.Format(LanguageManager.GetString("ErrBlurFailed"), displayStep); }
+                            else { intent.Type = IntentType.Click; intent.FriendlyErrorMessage = string.Format(LanguageManager.GetString("ErrClickFailed"), displayStep); }
                         }
-                        else if (action == "mouseover" || action == "mouseenter" || action == "hover")
-                        {
-                            intent.Type = IntentType.Hover; intent.FriendlyErrorMessage = string.Format(LanguageManager.GetString("ErrHoverGeneric"), displayStep);
-                        }
-                        else if (action == "change" || action == "input" || action == "fill")
-                        {
-                            intent.Type = IntentType.InputText; intent.Value = value; intent.FriendlyErrorMessage = string.Format(LanguageManager.GetString("ErrInputFailed"), displayStep);
-                        }
-                        else if (action.StartsWith("keypress_"))
-                        {
-                            intent.Type = IntentType.KeyPress; intent.Key = action.Replace("keypress_", ""); intent.FriendlyErrorMessage = string.Format(LanguageManager.GetString("ErrKeyFailed"), displayStep);
-                        }
-                        else if (action == "scroll")
-                        {
-                            intent.Type = IntentType.ScrollTo; intent.FriendlyErrorMessage = string.Format(LanguageManager.GetString("ErrScrollFailed"), displayStep);
-                        }
+                        else if (action == "change" || action == "input" || action == "fill") { intent.Type = IntentType.InputText; intent.Value = value; intent.FriendlyErrorMessage = string.Format(LanguageManager.GetString("ErrInputFailed"), displayStep); }
+                        else if (action.StartsWith("keypress_")) { intent.Type = IntentType.KeyPress; intent.Key = action.Replace("keypress_", ""); intent.FriendlyErrorMessage = string.Format(LanguageManager.GetString("ErrKeyFailed"), displayStep); }
                         else { intent.Type = IntentType.Unknown; }
 
                         rawIntents.Add(intent);
-                        microIndex++;
+                        interactionIndex++;
                     }
                 }
             }
 
-            var cleanIntents = new List<AutomationIntent>();
-            foreach (var intent in rawIntents)
-            {
-                if (intent.Type == IntentType.Unknown && !intent.IsNewStepHeader) continue;
-                cleanIntents.Add(intent);
-            }
-
-            return cleanIntents;
+            return rawIntents.Where(i => i.Type != IntentType.Unknown).ToList();
         }
 
-        private string ExtractRawLocator(string overrideCode, SelectorSetDto? fallbackSet)
+        public static List<InteractionDto> GetCleanInteractionTrail(List<InteractionDto> rawTrail)
         {
-            if (string.IsNullOrWhiteSpace(overrideCode)) return LocatorEngine.GetBestRawLocator(fallbackSet) ?? "";
+            if (rawTrail == null) return new List<InteractionDto>();
+            var clean = new List<InteractionDto>();
 
-            // 🚀 PARSER BLINDADO: Entende com aspas, sem aspas e até com a seta "->" do Painel SDET!
-            var match = Regex.Match(overrideCode, "\"(.*?)\"");
-            if (match.Success)
+            for (int i = 0; i < rawTrail.Count; i++)
             {
-                string val = match.Groups[1].Value;
-                if (val.StartsWith("xpath=")) return val.Substring(6);
-                if (val.StartsWith("css=")) return val.Substring(4);
-                return val;
+                var current = rawTrail[i];
+                string action = current.InteractionType?.ToLower() ?? "";
+
+                // EXTERMINA EVENTOS DO SISTEMA
+                if (action == "focus" || action == "blur" || action == "mouseover" || action == "mouseenter" || action == "mouseleave")
+                    continue;
+
+                // 🚀 DEDUPLICAÇÃO DE DIGITAÇÃO CONTÍNUA (Ignora se for keypress como tab/enter, eles são mantidos separados)
+                if (action == "change" || action == "input" || action == "fill")
+                {
+                    var lastAdded = clean.LastOrDefault();
+                    if (lastAdded != null && (lastAdded.InteractionType?.ToLower() == "change" || lastAdded.InteractionType?.ToLower() == "input" || lastAdded.InteractionType?.ToLower() == "fill"))
+                    {
+                        bool isSameElement = (!string.IsNullOrEmpty(current.ElementId) && current.ElementId == lastAdded.ElementId) ||
+                                             (!string.IsNullOrEmpty(current.BoundingBox) && current.BoundingBox == lastAdded.BoundingBox);
+
+                        if (isSameElement)
+                        {
+                            if (!string.IsNullOrEmpty(current.Value)) lastAdded.Value = current.Value;
+                            if (!string.IsNullOrEmpty(current.VisibleText)) lastAdded.VisibleText = current.VisibleText;
+                            continue;
+                        }
+                    }
+                }
+
+                // DEDUPLICAÇÃO DE CLIQUE ANTES DA DIGITAÇÃO NO MESMO CAMPO
+                if (action == "click")
+                {
+                    var nextAction = rawTrail.Skip(i + 1).FirstOrDefault(x =>
+                        x.InteractionType?.ToLower() != "focus" &&
+                        x.InteractionType?.ToLower() != "blur" &&
+                        x.InteractionType?.ToLower() != "mouseover");
+
+                    if (nextAction != null)
+                    {
+                        string nextType = nextAction.InteractionType?.ToLower() ?? "";
+                        if (nextType == "change" || nextType == "input" || nextType == "fill" || nextType.StartsWith("keypress_"))
+                        {
+                            bool isSameElement = (!string.IsNullOrEmpty(current.ElementId) && current.ElementId == nextAction.ElementId) ||
+                                                 (!string.IsNullOrEmpty(current.BoundingBox) && current.BoundingBox == nextAction.BoundingBox);
+
+                            if (isSameElement) continue;
+                        }
+                    }
+                }
+
+                clean.Add(current);
+            }
+            return clean;
+        }
+
+        private string ExtractRawLocator(string overrideCode, SelectorSetDto? fallbackSet, InteractionDto? interaction)
+        {
+            if (!string.IsNullOrWhiteSpace(overrideCode))
+            {
+                var match = Regex.Match(overrideCode, "\"(.*?)\"");
+                if (match.Success)
+                {
+                    string val = match.Groups[1].Value;
+                    if (val.StartsWith("xpath=")) return val.Substring(6);
+                    if (val.StartsWith("css=")) return val.Substring(4);
+                    return val;
+                }
+                string cleanOverride = overrideCode.Contains("->") ? overrideCode.Split(new[] { "->" }, StringSplitOptions.None).Last().Trim() : overrideCode;
+                return cleanOverride.StartsWith("xpath=") ? cleanOverride.Substring(6) : (cleanOverride.StartsWith("css=") ? cleanOverride.Substring(4) : cleanOverride);
             }
 
-            string cleanOverride = overrideCode;
-            if (cleanOverride.Contains("->"))
+            string bestLoc = LocatorEngine.GetBestRawLocator(fallbackSet);
+            if (string.IsNullOrEmpty(bestLoc) || bestLoc.Contains("AMBÍGUOS") || bestLoc.Contains("AMBIGUOUS") || bestLoc.Contains("NOT FOUND"))
             {
-                cleanOverride = cleanOverride.Split(new[] { "->" }, StringSplitOptions.None).Last().Trim();
+                if (interaction != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(interaction.ElementId)) return $"css=#{interaction.ElementId}";
+
+                    // Fallback para XPath Absolute do Bidi se não houver um custom id
+                    string bidiXpath = interaction.WebDriverBiDi?.ElementData?.SelectorSet?.XpathAbsolute?.Value;
+                    if (!string.IsNullOrWhiteSpace(bidiXpath)) return $"xpath={bidiXpath}";
+
+                    if (!string.IsNullOrWhiteSpace(interaction.VisibleText)) { string safeText = interaction.VisibleText.Replace("\"", "\\\"").Replace("'", "\\'"); return $"xpath=//*[normalize-space(text())='{safeText}']"; }
+                    if (!string.IsNullOrWhiteSpace(interaction.Classes)) { string cleanClasses = string.Join(".", interaction.Classes.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)); return $"css={interaction.TagName}.{cleanClasses}"; }
+                    if (!string.IsNullOrWhiteSpace(interaction.TagName)) return $"css={interaction.TagName}";
+                }
+                return "css=body";
             }
-
-            if (cleanOverride.StartsWith("xpath=")) return cleanOverride.Substring(6);
-            if (cleanOverride.StartsWith("css=")) return cleanOverride.Substring(4);
-
-            return cleanOverride;
+            return bestLoc;
         }
     }
 }
