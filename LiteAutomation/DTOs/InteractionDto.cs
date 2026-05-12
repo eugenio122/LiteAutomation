@@ -15,7 +15,7 @@ namespace LiteAutomation.DTOs
         [JsonPropertyName("boundingBox")] public string? BoundingBox { get; set; }
         [JsonPropertyName("scrollX")] public int ScrollX { get; set; }
         [JsonPropertyName("scrollY")] public int ScrollY { get; set; }
-        [JsonPropertyName("urlPath")] public string? UrlPath { get; set; }
+        [JsonPropertyName("url")] public string? Url { get; set; }
 
         // As gavetas ricas agora vêm direto no evento!
         [JsonPropertyName("WebDriver_BiDi")] public EngineNodeDto<BiDiElementDataDto>? WebDriverBiDi { get; set; }

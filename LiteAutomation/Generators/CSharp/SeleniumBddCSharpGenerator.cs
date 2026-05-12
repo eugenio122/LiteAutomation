@@ -130,8 +130,8 @@ namespace LiteAutomation.Generators.CSharp
                         if (locLowerCheck.Contains("body") || locLowerCheck.Contains("vazio") || string.IsNullOrEmpty(intent.TargetLocator))
                         {
                             if (!string.IsNullOrWhiteSpace(interaction.ElementId)) intent.TargetLocator = $"By.Id(\"{interaction.ElementId}\")";
-                            else if (!string.IsNullOrWhiteSpace(bidi?.SelectorSet?.XpathAbsolute?.Value)) intent.TargetLocator = $"By.XPath(\"{bidi.SelectorSet.XpathAbsolute.Value}\")";
-                            else if (!string.IsNullOrWhiteSpace(interaction.VisibleText)) { string safeText = interaction.VisibleText.Replace("\"", "\\\"").Replace("'", "\\'"); intent.TargetLocator = $"By.XPath(\"//*[normalize-space(text())='{safeText}']\")"; }
+                            else if (!string.IsNullOrWhiteSpace(bidi?.SelectorSet?.XpathAbsolute?.Value)) intent.TargetLocator = $"By.XPath(\"{bidi.SelectorSet.XpathAbsolute.Value.Replace("\"", "'")}\")";
+                            else if (!string.IsNullOrWhiteSpace(interaction.VisibleText)) { string safeText = interaction.VisibleText.Replace("\"", "'").Replace("\n", " ").Trim(); intent.TargetLocator = $"By.XPath(\"//*[normalize-space(text())='{safeText}']\")"; }
                             else if (!string.IsNullOrWhiteSpace(interaction.Classes)) { string cleanClasses = string.Join(".", interaction.Classes.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)); intent.TargetLocator = $"By.CssSelector(\"{interaction.TagName}.{cleanClasses}\")"; }
                             else if (!string.IsNullOrWhiteSpace(interaction.TagName)) intent.TargetLocator = $"By.TagName(\"{interaction.TagName}\")";
                         }
@@ -376,7 +376,8 @@ namespace LiteAutomation.Generators.CSharp
             }
             sb.AppendLine("*/\n");
 
-            sb.AppendLine("using System;\nusing TechTalk.SpecFlow;\nusing OpenQA.Selenium;\nusing OpenQA.Selenium.Chrome;\nusing OpenQA.Selenium.Support.UI;\nusing NUnit.Framework;\n");
+            // 🚀 IMPORTANTE: Adicionado OpenQA.Selenium.Interactions
+            sb.AppendLine("using System;\nusing TechTalk.SpecFlow;\nusing OpenQA.Selenium;\nusing OpenQA.Selenium.Chrome;\nusing OpenQA.Selenium.Support.UI;\nusing OpenQA.Selenium.Interactions;\nusing NUnit.Framework;\n");
             sb.AppendLine("namespace LiteAutomation.GeneratedTests.BDD\n{");
             sb.AppendLine($"    [Binding]");
             sb.AppendLine($"    public class {testClassName}Steps");
@@ -385,7 +386,6 @@ namespace LiteAutomation.Generators.CSharp
             sb.AppendLine($"        private WebDriverWait wait;");
             sb.AppendLine();
 
-            // 🚀 SEU SETUP ANTI-BOT E PRIMEIRA NAVEGAÇÃO
             sb.AppendLine("        [BeforeScenario]");
             sb.AppendLine("        public void Setup()");
             sb.AppendLine("        {");
@@ -409,7 +409,6 @@ namespace LiteAutomation.Generators.CSharp
 
             sb.AppendLine("        }\n");
 
-            // 🚀 SEU TEARDOWN ATUALIZADO
             sb.AppendLine("        [AfterScenario]");
             sb.AppendLine("        public void Teardown()");
             sb.AppendLine("        {");
@@ -476,21 +475,40 @@ namespace LiteAutomation.Generators.CSharp
             return varName;
         }
 
+        // 🚀 AÇÕES NATIVAS: Uso ostensivo de OpenQA.Selenium.Interactions.Actions
         private string GenerateActionCode(AutomationIntent intent, string loc)
         {
             switch (intent.Type)
             {
-                case IntentType.Click: return $"var el = wait.Until(d => d.FindElement({loc}));\n((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].scrollIntoView({{block: 'center'}});\", el);\ntry\n{{\n    el.Click();\n}}\ncatch\n{{\n    ((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].click();\", el);\n}}";
-                case IntentType.InputText: string safeInput = intent.Value != null ? intent.Value.Replace("\"", "\\\"") : ""; return $"var el = wait.Until(d => d.FindElement({loc}));\nel.Clear();\nel.SendKeys(\"{safeInput}\");";
-                case IntentType.KeyPress: return $"var el = wait.Until(d => d.FindElement({loc}));\nel.SendKeys({MapKey(intent.Key)});\nSystem.Threading.Thread.Sleep(500);";
-                case IntentType.AssertVisible: return $"Assert.IsTrue(wait.Until(d => d.FindElement({loc})).Displayed);";
-                default: return "";
+                case IntentType.Click:
+                    return $"var el = wait.Until(d => d.FindElement({loc}));\ntry\n{{\n    new Actions(driver).MoveToElement(el).Click().Perform();\n}}\ncatch\n{{\n    ((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].click();\", el);\n}}";
+                case IntentType.Hover:
+                    return $"var el = wait.Until(d => d.FindElement({loc}));\nnew Actions(driver).MoveToElement(el).Perform();";
+                case IntentType.Blur:
+                    return $"new Actions(driver).MoveByOffset(0, 0).Click().Perform();"; // Clique nativo fora do foco (coordenada 0,0)
+                case IntentType.InputText:
+                    string safeInput = intent.Value != null ? intent.Value.Replace("\"", "\\\"") : "";
+                    return $"var el = wait.Until(d => d.FindElement({loc}));\nnew Actions(driver).MoveToElement(el).Perform();\nel.Clear();\nel.SendKeys(\"{safeInput}\");";
+                case IntentType.KeyPress:
+                    return $"var el = wait.Until(d => d.FindElement({loc}));\nnew Actions(driver).MoveToElement(el).Perform();\nel.SendKeys({MapKey(intent.Key)});";
+                case IntentType.ScrollTo:
+                    return $"var el = wait.Until(d => d.FindElement({loc}));\nnew Actions(driver).MoveToElement(el).Perform();";
+                case IntentType.AssertVisible:
+                    return $"Assert.IsTrue(wait.Until(d => d.FindElement({loc})).Displayed);";
+                case IntentType.AssertEnabled:
+                    return $"Assert.IsTrue(wait.Until(d => d.FindElement({loc})).Enabled);";
+                default:
+                    return "";
             }
         }
 
         private string FormatLocator(string loc)
         {
             if (string.IsNullOrEmpty(loc) || loc.Contains("VAZIO") || loc.Contains("NÃO ENCONTRADO") || loc.Contains("AMBÍGUO")) return "By.TagName(\"body\")";
+
+            // CLEAN SYNTAX: Remove escapes visuais
+            loc = loc.Replace("\\\"", "'").Replace("\"", "'");
+
             if (loc.StartsWith("By.") || loc.StartsWith("Page.")) return loc;
             if (loc.StartsWith("xpath=") || loc.StartsWith("/") || loc.StartsWith("(")) return $"By.XPath(\"{loc.Replace("xpath=", "")}\")";
             if (loc.StartsWith("css=")) return $"By.CssSelector(\"{loc.Replace("css=", "")}\")";

@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using LiteAutomation.DTOs;
 using LiteAutomation.Enums;
 using LiteTools.Core.Languages;
+using LiteAutomation.Core.Security;
 
 namespace LiteAutomation.Core
 {
@@ -14,11 +15,18 @@ namespace LiteAutomation.Core
         {
             var rawIntents = new List<AutomationIntent>();
 
+            // 🚀 MAQUINA DE ESTADOS: Agrupa as interações por fronteira de página (URLs)
+            var mapper = new StateMapper();
+            var states = mapper.MapStates(steps);
+
             for (int i = 0; i < steps.Count; i++)
             {
                 var mainStep = steps[i];
                 if (!mainStep.IsActive || mainStep.PendingConfirmation) continue;
                 int stepIdx = mainStep.StepIndex ?? (i + 1);
+
+                // Recupera o estado (página) que engloba este passo para validar ambiguidade
+                var currentState = states.FirstOrDefault(s => s.Steps.Contains(mainStep));
 
                 // 1. A ÂNCORA DO PRINT
                 config.LocatorOverrides.TryGetValue($"{stepIdx}.0", out string overrideLoc0);
@@ -31,7 +39,8 @@ namespace LiteAutomation.Core
                     IsNewStepHeader = true,
                     StepId = $"{stepIdx}.0",
                     TargetLocator = rawLoc0,
-                    StepDescription = string.IsNullOrWhiteSpace(mainStep.StepName) ? $"{LanguageManager.GetString("LogStep")} {stepIdx}" : mainStep.StepName,
+                    // 🚀 LGPD: Sanitiza descrições que possam conter dados digitados
+                    StepDescription = string.IsNullOrWhiteSpace(mainStep.StepName) ? $"{LanguageManager.GetString("LogStep")} {stepIdx}" : PIISanitizer.Sanitize(mainStep.StepName),
                     FriendlyErrorMessage = string.Format(LanguageManager.GetString("ErrValidationFailed"), stepIdx),
                     Diagnostics = LanguageManager.GetString("DiagEvidenceValidation")
                 });
@@ -46,7 +55,10 @@ namespace LiteAutomation.Core
                     {
                         string displayStep = $"{stepIdx}.{interactionIndex}";
                         string action = interaction.InteractionType?.ToLower() ?? "unknown";
-                        string value = interaction.Value ?? "";
+
+                        // 🚀 LGPD DOUBLE CHECK: Sanitiza o valor extraído antes de ir para o código
+                        string value = PIISanitizer.Sanitize(interaction.Value ?? "");
+                        interaction.VisibleText = PIISanitizer.Sanitize(interaction.VisibleText ?? "");
 
                         // 🚀 ACESSO O(1) DIRETO NA GAVETA DO EVENTO
                         var bidi = interaction.WebDriverBiDi?.ElementData;
@@ -56,6 +68,15 @@ namespace LiteAutomation.Core
 
                         config.LocatorOverrides.TryGetValue(displayStep, out string overrideLoc);
                         string rawLocator = ExtractRawLocator(overrideLoc, bidi?.SelectorSet, interaction);
+
+                        // 🚀 VERIFICAÇÃO DE AMBIGUIDADE O(N) EM MEMÓRIA
+                        bool isAmbiguous = CheckAmbiguidade(rawLocator, currentState);
+                        if (isAmbiguous && pseudoCapturedData.WebDriverBiDi != null)
+                        {
+                            pseudoCapturedData.WebDriverBiDi.QualityFlags ??= new List<string>();
+                            if (!pseudoCapturedData.WebDriverBiDi.QualityFlags.Contains("WARNING_AMBIGUOUS_LOCATOR"))
+                                pseudoCapturedData.WebDriverBiDi.QualityFlags.Add("WARNING_AMBIGUOUS_LOCATOR");
+                        }
 
                         string diagnostics = pseudoCapturedData.WebDriverBiDi != null || pseudoCapturedData.Uia != null ? LocatorEngine.GetDiagnostics(pseudoCapturedData, config.Strategy) : "";
 
@@ -174,6 +195,50 @@ namespace LiteAutomation.Core
                 return "css=body";
             }
             return bestLoc;
+        }
+
+        /// <summary>
+        /// Varre a árvore do DOM visível mapeada na tela para garantir que o seletor gerado é único.
+        /// Substitui a verificação pesada do navegador por uma contagem em memória (O(N)).
+        /// </summary>
+        private bool CheckAmbiguidade(string rawLocator, PageState state)
+        {
+            if (state == null || state.BaseVisibleElements == null || state.BaseVisibleElements.Count == 0) return false;
+            if (string.IsNullOrWhiteSpace(rawLocator) || rawLocator.Contains("body")) return false;
+
+            // Limpa formatação externa para realizar um `Contains` limpo no DOM espelhado.
+            string cleanLoc = rawLocator.Replace("css=", "").Replace("xpath=", "").Replace("By.CssSelector(", "").Replace("By.XPath(", "").Replace("By.Id(", "").Replace("\")", "").Replace("\"", "").Replace("'", "").Trim();
+            if (string.IsNullOrEmpty(cleanLoc)) return false;
+
+            int matchCount = 0;
+
+            void Traverse(List<VisibleElementDto> nodes)
+            {
+                if (matchCount > 1) return; // Fast exit (Ambíguo)
+                foreach (var node in nodes)
+                {
+                    var bidiSet = node.CapturedData?.WebDriverBiDi?.ElementData?.SelectorSet;
+                    if (bidiSet != null)
+                    {
+                        bool isMatch = false;
+
+                        if (!string.IsNullOrEmpty(bidiSet.CustomAttribute?.Value) && bidiSet.CustomAttribute.Value.Replace("\"", "'").Contains(cleanLoc)) isMatch = true;
+                        else if (!string.IsNullOrEmpty(bidiSet.Id?.Value) && bidiSet.Id.Value.Contains(cleanLoc)) isMatch = true;
+                        else if (!string.IsNullOrEmpty(bidiSet.Css?.Value) && bidiSet.Css.Value.Replace("\"", "'").Contains(cleanLoc)) isMatch = true;
+                        else if (!string.IsNullOrEmpty(bidiSet.XpathRelative?.Value) && bidiSet.XpathRelative.Value.Replace("\"", "'").Contains(cleanLoc)) isMatch = true;
+                        else if (!string.IsNullOrEmpty(bidiSet.XpathAbsolute?.Value) && bidiSet.XpathAbsolute.Value.Replace("\"", "'").Contains(cleanLoc)) isMatch = true;
+                        else if (!string.IsNullOrEmpty(bidiSet.Name?.Value) && bidiSet.Name.Value.Contains(cleanLoc)) isMatch = true;
+
+                        if (isMatch) matchCount++;
+                    }
+
+                    if (node.Children != null && node.Children.Count > 0)
+                        Traverse(node.Children);
+                }
+            }
+
+            Traverse(state.BaseVisibleElements);
+            return matchCount > 1; // Retorna true apenas se houver colisões diretas
         }
     }
 }

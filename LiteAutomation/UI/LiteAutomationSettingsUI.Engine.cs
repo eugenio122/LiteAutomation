@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using LiteAutomation.Core;
+using LiteAutomation.Core.Security;
 using LiteAutomation.DTOs;
 using LiteAutomation.Enums;
 using LiteAutomation.Factories;
@@ -56,6 +57,7 @@ namespace LiteAutomation.UI
                         continue;
 
                     int stepIdx = main.StepIndex ?? 0;
+                    var visibleElements = main.ObservedContext?.VisibleElements;
 
                     // 1. A ÂNCORA DO PRINT (X.0)
                     string displayStep0 = $"{stepIdx}.0";
@@ -110,9 +112,17 @@ namespace LiteAutomation.UI
                                 if (uia != null && !string.IsNullOrWhiteSpace(uia.Semantic?.AccessibleName?.Value))
                                 {
                                     string role = uia.Semantic.Role?.Value?.ToLower() ?? LanguageManager.GetString("SdetElement");
-                                    string rawName = uia.Semantic.AccessibleName.Value.Replace("\"", "'").Replace("\n", " ").Replace("\r", "");
+
+                                    // 🚀 LGPD e CLEAN JSON: Higieniza o texto extraído da tela
+                                    string rawName = PIISanitizer.Sanitize(uia.Semantic.AccessibleName.Value).Replace("\\\"", "'").Replace("\"", "'").Replace("\n", " ").Replace("\r", "");
                                     string shortName = rawName.Length > 35 ? rawName.Substring(0, 35).Trim() : rawName;
-                                    int score = uia.Semantic.AccessibleName.Confidence >= 0 ? uia.Semantic.AccessibleName.Confidence : 80;
+
+                                    int score = uia.Semantic.AccessibleName.Confidence;
+
+                                    // 🚀 MOTOR DE AMBIGUIDADE (Substitui o antigo Confidence < 0 nativo)
+                                    if (IsLocatorAmbiguous(shortName, visibleElements))
+                                        score = -Math.Abs(score == 0 ? 80 : score);
+
                                     string codeSnippet = "";
 
                                     if (uia.Semantic.AutomationId?.Value == "RootWebArea" || role == "documento" || role == "região")
@@ -135,32 +145,38 @@ namespace LiteAutomation.UI
 
                                 if (bidi?.SelectorSet != null)
                                 {
-                                    AddOptionFromBidi(baseOptions, bidi.SelectorSet, isPlaywright);
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.CustomAttribute, LanguageManager.GetString("SdetCustomAttr"), isPlaywright, "Page.Locator(\"{0}\")", "By.CssSelector(\"{0}\")", false, LanguageManager.GetString("CatDom"));
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Id, "ID", isPlaywright, "Page.Locator(\"{0}\")", "By.CssSelector(\"{0}\")", false, LanguageManager.GetString("CatDom"));
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Name, "Name", isPlaywright, "Page.Locator(\"{0}\")", "By.CssSelector(\"{0}\")", false, LanguageManager.GetString("CatDom"));
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Text, LanguageManager.GetString("SdetVisibleText"), isPlaywright, "Page.Locator(\"xpath={0}\")", "By.XPath(\"{0}\")", false, LanguageManager.GetString("CatDom"));
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Css, "CSS", isPlaywright, "Page.Locator(\"css={0}\")", "By.CssSelector(\"{0}\")", false, LanguageManager.GetString("CatDom"));
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.XpathRelative, LanguageManager.GetString("SdetRelativeXPath"), isPlaywright, "Page.Locator(\"xpath={0}\")", "By.XPath(\"{0}\")", false, LanguageManager.GetString("CatDom"));
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.XpathAbsolute, LanguageManager.GetString("SdetAbsoluteXPath"), isPlaywright, "Page.Locator(\"xpath={0}\")", "By.XPath(\"{0}\")", false, LanguageManager.GetString("CatDom"));
-                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.AriaLabel, "Aria-Label", isPlaywright, "Page.Locator(\"css={0}\")", "By.CssSelector(\"{0}\")", true, LanguageManager.GetString("CatSemantic"));
+                                    AddOptionFromBidi(baseOptions, bidi.SelectorSet, isPlaywright, visibleElements);
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.CustomAttribute, LanguageManager.GetString("SdetCustomAttr"), isPlaywright, "Page.Locator(\"{0}\")", "By.CssSelector(\"{0}\")", false, LanguageManager.GetString("CatDom"), visibleElements);
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Id, "ID", isPlaywright, "Page.Locator(\"{0}\")", "By.CssSelector(\"{0}\")", false, LanguageManager.GetString("CatDom"), visibleElements);
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Name, "Name", isPlaywright, "Page.Locator(\"{0}\")", "By.CssSelector(\"{0}\")", false, LanguageManager.GetString("CatDom"), visibleElements);
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Text, LanguageManager.GetString("SdetVisibleText"), isPlaywright, "Page.Locator(\"xpath={0}\")", "By.XPath(\"{0}\")", false, LanguageManager.GetString("CatDom"), visibleElements);
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.Css, "CSS", isPlaywright, "Page.Locator(\"css={0}\")", "By.CssSelector(\"{0}\")", false, LanguageManager.GetString("CatDom"), visibleElements);
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.XpathRelative, LanguageManager.GetString("SdetRelativeXPath"), isPlaywright, "Page.Locator(\"xpath={0}\")", "By.XPath(\"{0}\")", false, LanguageManager.GetString("CatDom"), visibleElements);
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.XpathAbsolute, LanguageManager.GetString("SdetAbsoluteXPath"), isPlaywright, "Page.Locator(\"xpath={0}\")", "By.XPath(\"{0}\")", false, LanguageManager.GetString("CatDom"), visibleElements);
+                                    AddOptionIfValid(baseOptions, bidi.SelectorSet.AriaLabel, "Aria-Label", isPlaywright, "Page.Locator(\"css={0}\")", "By.CssSelector(\"{0}\")", true, LanguageManager.GetString("CatSemantic"), visibleElements);
                                 }
 
                                 if (baseOptions.Count == 0 || !baseOptions.Any(o => o.Confidence >= 80))
                                 {
                                     if (!string.IsNullOrWhiteSpace(interaction.ElementId))
-                                        baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatDom"), Name = "ID Nativo do Evento", CodeSnippet = isPlaywright ? $"Page.Locator(\"#{interaction.ElementId}\")" : $"By.Id(\"{interaction.ElementId}\")", Confidence = 85, IsSemantic = false });
+                                    {
+                                        int score = IsLocatorAmbiguous(interaction.ElementId, visibleElements) ? -85 : 85;
+                                        baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatDom"), Name = "ID Nativo do Evento", CodeSnippet = isPlaywright ? $"Page.Locator(\"#{interaction.ElementId}\")" : $"By.Id(\"{interaction.ElementId}\")", Confidence = score, IsSemantic = false });
+                                    }
 
                                     if (!string.IsNullOrWhiteSpace(interaction.VisibleText))
                                     {
-                                        string safeText = interaction.VisibleText.Replace("\"", "\\\"").Replace("'", "\\'");
-                                        baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatSemantic"), Name = "Texto Nativo do Evento", CodeSnippet = isPlaywright ? $"Page.Locator(\"text={safeText}\")" : $"By.XPath(\"//*[normalize-space(text())='{safeText}']\")", Confidence = 80, IsSemantic = true });
+                                        // 🚀 LGPD e CLEAN JSON no Texto Nativo
+                                        string safeText = PIISanitizer.Sanitize(interaction.VisibleText).Replace("\\\"", "'").Replace("\"", "'");
+                                        int score = IsLocatorAmbiguous(safeText, visibleElements) ? -80 : 80;
+                                        baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatSemantic"), Name = "Texto Nativo do Evento", CodeSnippet = isPlaywright ? $"Page.Locator(\"text={safeText}\")" : $"By.XPath(\"//*[normalize-space(text())='{safeText}']\")", Confidence = score, IsSemantic = true });
                                     }
 
                                     if (!string.IsNullOrWhiteSpace(interaction.Classes))
                                     {
                                         string cleanClasses = string.Join(".", interaction.Classes.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries));
-                                        baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatDom"), Name = "CSS Class do Evento", CodeSnippet = isPlaywright ? $"Page.Locator(\"{interaction.TagName}.{cleanClasses}\")" : $"By.CssSelector(\"{interaction.TagName}.{cleanClasses}\")", Confidence = 65, IsSemantic = false });
+                                        int score = IsLocatorAmbiguous(cleanClasses, visibleElements) ? -65 : 65;
+                                        baseOptions.Add(new LocatorOption { Category = LanguageManager.GetString("CatDom"), Name = "CSS Class do Evento", CodeSnippet = isPlaywright ? $"Page.Locator(\"{interaction.TagName}.{cleanClasses}\")" : $"By.CssSelector(\"{interaction.TagName}.{cleanClasses}\")", Confidence = score, IsSemantic = false });
                                     }
 
                                     string bidiXpath = bidi?.SelectorSet?.XpathAbsolute?.Value;
@@ -203,16 +219,79 @@ namespace LiteAutomation.UI
             finally { gridLocators.ResumeLayout(); }
         }
 
-        private void AddOptionFromBidi(List<LocatorOption> list, SelectorSetDto set, bool isPlaywright)
+        private void AddOptionFromBidi(List<LocatorOption> list, SelectorSetDto set, bool isPlaywright, List<VisibleElementDto> visibleElements)
         {
-            void TryAdd(LocatorData loc, string name) { if (loc != null && loc.Confidence >= 0) list.Add(new LocatorOption { Name = name, CodeSnippet = isPlaywright ? LocatorEngine.GetBestPlaywrightLocator(new SelectorSetDto { Id = loc }) : LocatorEngine.GetBestSeleniumLocator(new SelectorSetDto { Id = loc }), Confidence = loc.Confidence, IsSemantic = false, Category = LanguageManager.GetString("CatDom") }); }
+            void TryAdd(LocatorData loc, string name)
+            {
+                if (loc != null && !string.IsNullOrWhiteSpace(loc.Value))
+                {
+                    string cleanVal = loc.Value.Replace("\\\"", "'").Replace("\"", "'");
+                    string snippet = isPlaywright ? LocatorEngine.GetBestPlaywrightLocator(new SelectorSetDto { Id = new LocatorData { Value = cleanVal } }) : LocatorEngine.GetBestSeleniumLocator(new SelectorSetDto { Id = new LocatorData { Value = cleanVal } });
+
+                    int score = loc.Confidence;
+                    if (IsLocatorAmbiguous(cleanVal, visibleElements)) score = -Math.Abs(score == 0 ? 10 : score);
+
+                    list.Add(new LocatorOption { Name = name, CodeSnippet = snippet, Confidence = score, IsSemantic = false, Category = LanguageManager.GetString("CatDom") });
+                }
+            }
             TryAdd(set.Id, "ID"); TryAdd(set.CustomAttribute, "TestID"); TryAdd(set.Name, "Name");
         }
 
-        private void AddOptionIfValid(List<LocatorOption> options, LocatorData locator, string name, bool isPW, string templatePW, string templateSel, bool isSem, string cat)
+        private void AddOptionIfValid(List<LocatorOption> options, LocatorData locator, string name, bool isPW, string templatePW, string templateSel, bool isSem, string cat, List<VisibleElementDto> visibleElements)
         {
-            if (locator != null && !string.IsNullOrWhiteSpace(locator.Value) && locator.Confidence >= 0)
-                options.Add(new LocatorOption { Category = cat, Name = name, CodeSnippet = isPW ? string.Format(templatePW, locator.Value.Replace("\"", "'")) : string.Format(templateSel, locator.Value.Replace("\"", "'")), Confidence = locator.Confidence, IsSemantic = isSem });
+            if (locator != null && !string.IsNullOrWhiteSpace(locator.Value))
+            {
+                // Limpeza visual profunda antes de montar o Snippet de Código
+                string cleanVal = locator.Value.Replace("\\\"", "'").Replace("\"", "'");
+                string codeSnippet = isPW ? string.Format(templatePW, cleanVal) : string.Format(templateSel, cleanVal);
+
+                int score = locator.Confidence;
+                if (IsLocatorAmbiguous(cleanVal, visibleElements)) score = -Math.Abs(score == 0 ? 10 : score);
+
+                options.Add(new LocatorOption { Category = cat, Name = name, CodeSnippet = codeSnippet, Confidence = score, IsSemantic = isSem });
+            }
+        }
+
+        /// <summary>
+        /// Motor de Ambiguidade Local (UI)
+        /// Navega pelos elementos mapeados no Snapshot da tela (Fronteira de Página) 
+        /// e pune o score do LocatorOption caso o seletor apareça mais de uma vez.
+        /// </summary>
+        private bool IsLocatorAmbiguous(string cleanLoc, List<VisibleElementDto> nodes)
+        {
+            if (nodes == null || string.IsNullOrWhiteSpace(cleanLoc)) return false;
+
+            cleanLoc = cleanLoc.Replace("css=", "").Replace("xpath=", "").Replace("By.CssSelector(", "").Replace("By.XPath(", "").Replace("By.Id(", "").Replace("\")", "").Replace("\"", "").Replace("'", "").Trim();
+            if (string.IsNullOrEmpty(cleanLoc)) return false;
+
+            int matchCount = 0;
+
+            void Traverse(List<VisibleElementDto> currentNodes)
+            {
+                if (matchCount > 1) return;
+                foreach (var node in currentNodes)
+                {
+                    var set = node.CapturedData?.WebDriverBiDi?.ElementData?.SelectorSet;
+                    if (set != null)
+                    {
+                        bool isMatch = false;
+                        if (!string.IsNullOrEmpty(set.CustomAttribute?.Value) && set.CustomAttribute.Value.Replace("\"", "'").Contains(cleanLoc)) isMatch = true;
+                        else if (!string.IsNullOrEmpty(set.Id?.Value) && set.Id.Value.Contains(cleanLoc)) isMatch = true;
+                        else if (!string.IsNullOrEmpty(set.Css?.Value) && set.Css.Value.Replace("\"", "'").Contains(cleanLoc)) isMatch = true;
+                        else if (!string.IsNullOrEmpty(set.XpathRelative?.Value) && set.XpathRelative.Value.Replace("\"", "'").Contains(cleanLoc)) isMatch = true;
+                        else if (!string.IsNullOrEmpty(set.XpathAbsolute?.Value) && set.XpathAbsolute.Value.Replace("\"", "'").Contains(cleanLoc)) isMatch = true;
+                        else if (!string.IsNullOrEmpty(set.Name?.Value) && set.Name.Value.Contains(cleanLoc)) isMatch = true;
+
+                        if (isMatch) matchCount++;
+                    }
+
+                    if (node.Children != null && node.Children.Count > 0)
+                        Traverse(node.Children);
+                }
+            }
+
+            Traverse(nodes);
+            return matchCount > 1;
         }
 
         private string MapToAriaRole(string role)

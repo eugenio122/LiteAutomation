@@ -32,7 +32,7 @@ namespace LiteAutomation.Generators.CSharp
                                        .Where(i => i.Type != IntentType.Unknown)
                                        .ToList();
 
-            // 🚀 2. GERAÇÃO DE CÓDIGO COM TRILHA LIMPA
+            // 🚀 2. GERAÇÃO DE CÓDIGO COM TRILHA LIMPA E CLEAN SYNTAX
             foreach (var intent in validIntents)
             {
                 if (intent.IsNewStepHeader)
@@ -60,11 +60,24 @@ namespace LiteAutomation.Generators.CSharp
                         if (string.IsNullOrEmpty(locLowerCheck) || locLowerCheck.Contains("body") || locLowerCheck.Contains("vazio") || locLowerCheck.Contains("ambígu"))
                         {
                             var bidi = interaction.WebDriverBiDi?.ElementData;
-                            if (!string.IsNullOrWhiteSpace(interaction.ElementId)) intent.TargetLocator = $"By.Id(\"{interaction.ElementId}\")";
-                            else if (!string.IsNullOrWhiteSpace(bidi?.SelectorSet?.XpathAbsolute?.Value)) intent.TargetLocator = $"By.XPath(\"{bidi.SelectorSet.XpathAbsolute.Value}\")";
-                            else if (!string.IsNullOrWhiteSpace(interaction.VisibleText)) { string safeText = interaction.VisibleText.Replace("\"", "\\\"").Replace("'", "\\'"); intent.TargetLocator = $"By.XPath(\"//*[normalize-space(text())='{safeText}']\")"; }
-                            else if (!string.IsNullOrWhiteSpace(interaction.Classes)) { string cleanClasses = string.Join(".", interaction.Classes.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries)); intent.TargetLocator = $"By.CssSelector(\"{interaction.TagName}.{cleanClasses}\")"; }
-                            else if (!string.IsNullOrWhiteSpace(interaction.TagName)) intent.TargetLocator = $"By.TagName(\"{interaction.TagName}\")";
+
+                            // 🚀 CLEAN SYNTAX: Uso de aspas simples ('') e remoção de escapes (\" e \n)
+                            if (!string.IsNullOrWhiteSpace(interaction.ElementId))
+                                intent.TargetLocator = $"By.Id(\"{interaction.ElementId}\")";
+                            else if (!string.IsNullOrWhiteSpace(bidi?.SelectorSet?.XpathAbsolute?.Value))
+                                intent.TargetLocator = $"By.XPath(\"{bidi.SelectorSet.XpathAbsolute.Value.Replace("\"", "'")}\")";
+                            else if (!string.IsNullOrWhiteSpace(interaction.VisibleText))
+                            {
+                                string safeText = interaction.VisibleText.Replace("\"", "'").Replace("\n", " ").Trim();
+                                intent.TargetLocator = $"By.XPath(\"//*[normalize-space(text())='{safeText}']\")";
+                            }
+                            else if (!string.IsNullOrWhiteSpace(interaction.Classes))
+                            {
+                                string cleanClasses = string.Join(".", interaction.Classes.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries));
+                                intent.TargetLocator = $"By.CssSelector(\"{interaction.TagName}.{cleanClasses}\")";
+                            }
+                            else if (!string.IsNullOrWhiteSpace(interaction.TagName))
+                                intent.TargetLocator = $"By.TagName(\"{interaction.TagName}\")";
                         }
                     }
                 }
@@ -76,7 +89,11 @@ namespace LiteAutomation.Generators.CSharp
                 switch (intent.Type)
                 {
                     case IntentType.NavigateToUrl:
-                        // Ignora se já inserimos lá em cima para evitar reload desnecessário
+                        // Ignora se for o mesmo da navegação inicial para não dar reload, mas permite navegações no meio do teste
+                        if (firstStepWithUrl != null && intent.Value == firstStepWithUrl.ObservedContext.Url)
+                            actionCode = "";
+                        else
+                            actionCode = $"driver.Navigate().GoToUrl(\"{intent.Value}\");";
                         break;
                     case IntentType.WaitUrlChange:
                         actionCode = $"wait.Until(d => d.Url.Contains(\"{intent.Value}\"));";
@@ -85,6 +102,7 @@ namespace LiteAutomation.Generators.CSharp
                         actionCode = $"var el_{id} = wait.Until(d => d.FindElement({loc}));\n((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].scrollIntoView({{block: 'center'}});\", el_{id});\ntry\n{{\n    el_{id}.Click();\n}}\ncatch\n{{\n    ((IJavaScriptExecutor)driver).ExecuteScript(\"arguments[0].click();\", el_{id});\n}}";
                         break;
                     case IntentType.InputText:
+                        // Aqui o escape é permitido apenas porque é um texto literal sendo digitado no SendKeys
                         string safeVal = intent.Value?.Replace("\"", "\\\"").Replace("\n", "\\n") ?? "";
                         actionCode = $"var el_{id} = wait.Until(d => d.FindElement({loc}));\nel_{id}.Clear();\nel_{id}.SendKeys(\"{safeVal}\");";
                         break;
@@ -127,6 +145,10 @@ namespace LiteAutomation.Generators.CSharp
         private string FormatLocator(string loc)
         {
             if (string.IsNullOrEmpty(loc) || loc.Contains("VAZIO") || loc.Contains("NÃO ENCONTRADO") || loc.Contains("AMBÍGUO")) return "By.TagName(\"body\")";
+
+            // 🚀 CLEAN SYNTAX: Assegura que nenhum escape residual vaze para o código final
+            loc = loc.Replace("\\\"", "'").Replace("\"", "'");
+
             if (loc.StartsWith("By.") || loc.StartsWith("Page.")) return loc;
             if (loc.StartsWith("xpath=") || loc.StartsWith("/") || loc.StartsWith("(")) return $"By.XPath(\"{loc.Replace("xpath=", "")}\")";
             if (loc.StartsWith("css=")) return $"By.CssSelector(\"{loc.Replace("css=", "")}\")";
@@ -140,7 +162,6 @@ namespace LiteAutomation.Generators.CSharp
             sb.AppendLine("using System;\nusing OpenQA.Selenium;\nusing OpenQA.Selenium.Chrome;\nusing OpenQA.Selenium.Support.UI;\nusing NUnit.Framework;");
             sb.AppendLine($"namespace LiteAutomation.GeneratedTests\n{{\n    public class {className}\n    {{\n        private IWebDriver driver;\n        private WebDriverWait wait;\n");
 
-            // 🚀 SEU SETUP ANTI-BOT EXATO
             sb.AppendLine("        [SetUp]\n        public void Setup()\n        {\n            var options = new ChromeOptions();");
             sb.AppendLine("            options.AddExcludedArgument(\"enable-automation\");");
             sb.AppendLine("            options.AddAdditionalOption(\"useAutomationExtension\", false);");
@@ -152,7 +173,6 @@ namespace LiteAutomation.Generators.CSharp
             sb.AppendLine("            driver.Manage().Window.Maximize();");
             sb.AppendLine("            wait = new WebDriverWait(driver, TimeSpan.FromSeconds(10));\n        }\n");
 
-            // 🚀 SEU TEARDOWN EXATO
             sb.AppendLine("        [TearDown]\n        public void Teardown()\n        {\n            driver?.Dispose();\n            driver = null;\n        }\n");
             sb.AppendLine($"        [Test]\n        [Timeout({timeout})]\n        public void ExecuteScenario()\n        {{");
         }
